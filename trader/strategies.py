@@ -77,6 +77,15 @@ def evaluate(prev, row, reg: str, cfg: dict, fee: float) -> Entry:
             return _NO  # 상승장 추세진입 끄기(박스권만 검증할 때)
         # 눌림목 복귀: 직전엔 ema_fast 아래 → 현재 위로 복귀(추세 재개 시 매수)
         if prev["close"] <= prev["ema_fast"] and row["close"] > row["ema_fast"]:
+            # 진입 품질 필터(가짜추세 컷) — 켜진 것만 적용
+            if s.get("require_adx_rising", False) and not (row["adx"] > prev["adx"]):
+                return _NO  # 추세 강도가 약해지는 중이면 진입 보류
+            if s.get("require_bull_candle", False) and not (row["close"] > row["open"]):
+                return _NO  # 진입봉이 음봉이면 보류
+            if row["adx"] < float(s.get("min_adx", 0)):
+                return _NO  # 추세 강도 최소기준 미달
+            if s.get("require_above_mid", False) and not (row["close"] > row["ema_mid"]):
+                return _NO  # 중기 EMA 위(더 강한 추세 위치)에서만
             mode = s.get("mode", "trail")
             if mode == "fixed":
                 # 1% 자주먹기: 고정 익절(수수료 제외 ≈순익 tp_pct) + 고정 손절, 물타기 없음(단일진입)

@@ -39,6 +39,8 @@ scalp:
   uptrend:                   # 상승장 진입 (검증결과 trail이 fixed 30조합 전부 이김)
     enabled: true
     mode: trail              # trail=추세 길게 타기(승자) | fixed=작게 자주먹기
+    require_adx_rising: true  # 추세 강해지는 중(ADX↑)일 때만 진입=가짜추세 컷.
+                              #   상승장 +1.85→+2.45%, 약세장 -3.30→-2.11% 둘다 개선
     sl_pct: 0.02             # 초기 손절 -2%
     trail_pct: 0.025         # 고점 대비 -2.5% 되돌림에 청산(승자를 길게)
     tp_pct: 0.011            # fixed 모드용 익절(미사용)

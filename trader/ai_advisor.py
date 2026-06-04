@@ -42,9 +42,46 @@ class Decision(BaseModel):
     reason: str = Field(description="한국어로 1~2문장의 판단 근거")
 
 
+# 시장 국면 판단용 지시문 (뉴스 + 차트 종합 → 상승/횡보/하락 결정)
+REGIME_SYSTEM_PROMPT = """당신은 암호화폐 시장의 '장세(국면)'를 판단하는 분석 AI입니다.
+
+당신의 역할: 비트코인(시장 대표) 차트 요약과 최신 영문 코인 뉴스를 종합하여,
+지금 전체 시장이 어떤 국면인지 결정합니다.
+
+국면 정의:
+- BULL(상승장): 가격이 추세적으로 상승, 호재 우위, 위험선호. → 추세추종 전략 적합.
+- SIDEWAYS(횡보장): 뚜렷한 방향 없이 등락 반복, 뉴스 중립. → 박스권 단타 적합.
+- BEAR(하락장): 추세적 하락, 악재 우위, 위험회피. → 신규매수 자제, 현금 보존.
+
+risk_off 플래그: 거래소 해킹/파산, 강한 규제·소송, 스테이블코인 디페그, 대규모
+청산·급락 등 '명백하고 급박한 악재'가 있으면 true (국면과 별개로 즉시 방어).
+
+원칙:
+- 차트와 뉴스가 일치하면 확신도를 높여라.
+- 차트는 상승인데 뉴스가 강한 악재면 보수적으로(SIDEWAYS/BEAR 쪽) 판단하라.
+- 정보가 부족하면 차트를 따르되 확신도를 낮춰라.
+반드시 한국어로 간결한 이유를 작성하라."""
+
+
+class RegimeDecision(BaseModel):
+    """AI의 시장 국면 판단 (구조화 출력)."""
+    regime: str = Field(description='"BULL"(상승) | "SIDEWAYS"(횡보) | "BEAR"(하락)')
+    risk_off: bool = Field(description="명백·급박한 악재로 신규매수를 즉시 중단해야 하면 true")
+    confidence: int = Field(description="판단 확신도 0~100")
+    reason: str = Field(description="한국어로 1~2문장의 근거(차트·뉴스 종합)")
+
+
 @dataclass
 class AdvisorResult:
     action: str           # BUY | HOLD | ERROR
+    confidence: int
+    reason: str
+
+
+@dataclass
+class RegimeView:
+    regime: str           # BULL | SIDEWAYS | BEAR | ERROR
+    risk_off: bool
     confidence: int
     reason: str
 
@@ -123,3 +160,45 @@ class AIAdvisor:
     def approves_buy(self, result: AdvisorResult) -> bool:
         """AI 결과가 매수를 승인하는지 (BUY + 확신도 충족)."""
         return result.action == "BUY" and result.confidence >= self.min_confidence
+
+    def decide_regime(self, market_summary: str,
+                      headlines: List[Headline]) -> RegimeView:
+        """시장 차트 요약 + 뉴스를 종합해 현재 시장 국면(BULL/SIDEWAYS/BEAR)을 판단."""
+        if not self.enabled or self._client is None:
+            return RegimeView("ERROR", False, 0, self.disabled_reason or "AI 비활성")
+
+        news_text = "\n".join(
+            f"- [{h.source}] {h.title}" + (f" — {h.summary}" if h.summary else "")
+            for h in headlines
+        ) or "(수집된 뉴스 없음)"
+
+        user_prompt = f"""[시장(비트코인) 차트 요약]
+{market_summary}
+
+[최신 영문 코인 뉴스 헤드라인]
+{news_text}
+
+위 차트와 뉴스를 종합하여 현재 시장 국면(BULL/SIDEWAYS/BEAR)과 risk_off 여부를 판단하세요."""
+
+        try:
+            resp = self._client.messages.parse(
+                model=self.model,
+                max_tokens=600,
+                system=[{
+                    "type": "text",
+                    "text": REGIME_SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                messages=[{"role": "user", "content": user_prompt}],
+                output_format=RegimeDecision,
+            )
+            d = resp.parsed_output
+            if d is None:
+                return RegimeView("ERROR", False, 0, "AI 응답 파싱 실패")
+            reg = str(d.regime).upper()
+            if reg not in ("BULL", "SIDEWAYS", "BEAR"):
+                reg = "SIDEWAYS"
+            conf = max(0, min(100, int(d.confidence)))
+            return RegimeView(reg, bool(d.risk_off), conf, d.reason.strip())
+        except Exception as e:
+            return RegimeView("ERROR", False, 0, f"AI 호출 오류: {type(e).__name__}: {e}")

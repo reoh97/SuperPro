@@ -54,9 +54,12 @@ class CoinResult:
     bars: int = 0
     fees_paid: float = 0.0
     error: Optional[str] = None
+    # (timestamp, 평가액=현금+보유평가) 시계열. record_curve=True일 때만 채워짐.
+    equity_curve: List[tuple] = field(default_factory=list)
 
 
-def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict) -> CoinResult:
+def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict,
+              record_curve: bool = False) -> CoinResult:
     """한 종목에 대해 국면별 전략 + 분할매수를 시뮬레이션.
 
     - 상승장(trail): 단일 진입, 트레일링으로 길게 끌어 5~6%+ 포착 → 청산 후 재진입.
@@ -124,6 +127,12 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict) -> CoinResult:
         row = rows.iloc[i]
         prev = rows.iloc[i - 1]
         t = str(row[time_col])
+
+        # 평가액(현금+보유평가) 시계열 — 라이브 서킷이 보는 '총평가액'과 동일 의미.
+        # 현재봉 종가로 마크(봉내 체결은 다음봉에 반영=1봉 지연, 빈도추정엔 무방).
+        if record_curve:
+            px = float(row["close"])
+            res.equity_curve.append((t, cash + (pos["size"] * px if pos is not None else 0.0)))
 
         # 확정 국면 갱신(휩쏘 방지)
         raw = regime.classify(row, cfg)

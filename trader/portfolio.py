@@ -137,6 +137,15 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict) -> CoinResult:
                 if row["low"] <= stop:
                     exit_price, exit_reason = stop, "trail"
                 # 추세 모드는 타임아웃 없이 트레일링이 청산을 책임짐
+            elif pos["exit_mode"] == "scalp":
+                # 상승장 1% 자주먹기: 단일진입, 고정 익절 + 고정 손절(물타기 없음)
+                tp_price = avg * (1 + pos["tp_pct"])
+                if row["low"] <= pos["sl_price"]:
+                    exit_price, exit_reason = pos["sl_price"], "sl"
+                elif row["high"] >= tp_price:
+                    exit_price, exit_reason = tp_price, "tp"
+                elif pos["bars_held"] >= max_hold:
+                    exit_price, exit_reason = float(row["close"]), "timeout"
             else:
                 # 횡보/하락장(분할매수): 평단 대비 익절, 트랜치 소진 후 방어 손절
                 tp_price = avg * (1 + pos["tp_pct"])
@@ -196,14 +205,15 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict) -> CoinResult:
     return res
 
 
-def run(cfg: dict, unit: int, count: int, log=print) -> List[CoinResult]:
-    """설정의 종목 리스트 전체를 분할매수 전략으로 백테스트."""
+def run(cfg: dict, unit: int, count: int, to_kst=None, log=print) -> List[CoinResult]:
+    """설정의 종목 리스트 전체를 분할매수 전략으로 백테스트.
+    to_kst를 주면 그 시점 이전의 과거구간(예: 2024년 상승장)을 검증."""
     pcfg = cfg.get("portfolio", {})
     tickers = pcfg.get("tickers", [cfg["ticker"]])
     results: List[CoinResult] = []
     for tk in tickers:
         log(f"  [{tk}] 분봉 {count}개 수집 중...")
-        df = backtest.fetch_minutes(tk, unit, count)
+        df = backtest.fetch_minutes(tk, unit, count, to_kst=to_kst)
         if df is None or len(df) < 250:
             results.append(CoinResult(ticker=tk, budget=float(pcfg.get("per_coin_krw", 0)),
                                       end_value=float(pcfg.get("per_coin_krw", 0)),

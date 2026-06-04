@@ -75,10 +75,16 @@ def evaluate(prev, row, reg: str, cfg: dict, fee: float) -> Entry:
         s = scfg.get("uptrend", {})
         if not bool(s.get("enabled", True)):
             return _NO  # 상승장 추세진입 끄기(박스권만 검증할 때)
-        sl = float(s.get("sl_pct", 0.006))
-        trail = float(s.get("trail_pct", 0.006))
         # 눌림목 복귀: 직전엔 ema_fast 아래 → 현재 위로 복귀(추세 재개 시 매수)
         if prev["close"] <= prev["ema_fast"] and row["close"] > row["ema_fast"]:
+            mode = s.get("mode", "trail")
+            if mode == "fixed":
+                # 1% 자주먹기: 고정 익절(수수료 제외 ≈순익 tp_pct) + 고정 손절, 물타기 없음(단일진입)
+                tp = max(float(s.get("tp_pct", 0.011)), _min_tp(cfg, fee))
+                sl = float(s.get("sl_pct", 0.015))
+                return Entry(True, "scalp", tp, sl, 0.0, "상승장 단타(고정 익절)")
+            sl = float(s.get("sl_pct", 0.02))
+            trail = float(s.get("trail_pct", 0.025))
             return Entry(True, "trail", 0.0, sl, trail, "상승장 추세추종(트레일링)")
         return _NO
 

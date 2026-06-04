@@ -18,10 +18,16 @@ from . import indicators, regime, strategies
 
 
 # ---------- 과거 분봉 수집 (200개 초과는 페이지네이션) ----------
-def fetch_minutes(ticker: str, unit: int, count: int) -> Optional[pd.DataFrame]:
+def fetch_minutes(ticker: str, unit: int, count: int,
+                  to_kst: Optional[str] = None) -> Optional[pd.DataFrame]:
+    """과거 분봉 수집. to_kst("YYYY-MM-DD HH:MM:SS", KST)를 주면 그 시점 '이전'
+    구간을 받는다(상승장 등 특정 과거구간 검증용). 미지정 시 최신 구간."""
     interval = f"minute{unit}"
     frames: List[pd.DataFrame] = []
+    # pyupbit `to`는 UTC 해석 → KST 종료시각을 9시간 빼서 넘긴다.
     to = None
+    if to_kst:
+        to = (pd.Timestamp(to_kst) - pd.Timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S")
     remaining = count
     while remaining > 0:
         n = min(200, remaining)

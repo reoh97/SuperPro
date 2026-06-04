@@ -36,10 +36,12 @@ scalp:
   min_profit_buffer: 0.002
   max_hold_bars: 480
   confirm_bars: 3
-  uptrend:                   # 상승장: 추세 타고 5~6%+ 먹기 → 청산 후 재진입 반복
-    sl_pct: 0.02             # 초기 손절 -2%
-    trail_pct: 0.025         # 고점 대비 -2.5% 되돌림에 청산(승자를 길게 끌어 5~6%+ 포착)
+  uptrend:                   # 상승장 진입 (검증결과 trail이 fixed 30조합 전부 이김)
     enabled: true
+    mode: trail              # trail=추세 길게 타기(승자) | fixed=작게 자주먹기
+    sl_pct: 0.02             # 초기 손절 -2%
+    trail_pct: 0.025         # 고점 대비 -2.5% 되돌림에 청산(승자를 길게)
+    tp_pct: 0.011            # fixed 모드용 익절(미사용)
   sideways:                  # 횡보장: 박스권 반복 신호 발라먹기(여러 번 왕복)
     mode: range
     box_lookback: 40

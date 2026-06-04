@@ -77,6 +77,7 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict,
 
     scfg = cfg.get("scalp", {})
     confirm_bars = int(scfg.get("confirm_bars", 3))
+    exit_on_down = bool(scfg.get("exit_on_down", True))  # DOWN 확정전환 시 보유분 즉시청산(False=홀드)
     ucfg = scfg.get("uptrend", {})
     pyramid = bool(ucfg.get("pyramid", False))           # 상승장 불타기
     pyramid_step = float(ucfg.get("pyramid_step", 0.02))  # 직전 진입가 +step 상승마다 추가
@@ -152,7 +153,8 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict,
 
             # 국면전환 탈출: 보유 중 DOWN으로 확정 전환되면 즉시 청산
             # (박스/추세가 진짜로 깨진 신호 → 물타기 멈추고 탈출, 큰 방어손절 회피)
-            if confirmed == regime.DOWN and pos["regime"] != regime.DOWN:
+            # exit_on_down=False면 청산하지 않고 각자 TP/SL까지 홀드(약세장 '대기' 비교용).
+            if exit_on_down and confirmed == regime.DOWN and pos["regime"] != regime.DOWN:
                 close_pos(pos, float(row["close"]), "regime", t)
                 pos = None
                 continue

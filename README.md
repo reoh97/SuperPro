@@ -46,6 +46,19 @@ python run.py
 | `loop.interval_sec` | 현재가 폴링 주기(초) |
 | `paper.initial_krw` | 모의 시작 자본 |
 
+## 목표수익 알림 (서킷브레이커)
+
+무지성 반복매매를 막기 위해, **누적 수익률이 목표(기본 +1.1%)에 도달하면
+보유 전량을 청산하고 매매를 멈춘 뒤 텔레그램으로 알립니다.** 대시보드 [재개] 버튼을
+누르면 그때 평가액을 새 기준선으로 다시 시작합니다. (`config.yaml`의 `circuit` 섹션)
+
+텔레그램 알림을 받으려면 환경변수(.env 권장)를 설정하세요:
+```powershell
+$env:TELEGRAM_BOT_TOKEN = "BotFather에서_발급받은_토큰"
+$env:TELEGRAM_CHAT_ID   = "본인_채팅ID"   # 봇과 대화 후 getUpdates 의 chat.id
+```
+미설정이면 대시보드 상단 배너로만 알립니다(매매는 동일하게 정지).
+
 ## 실거래 전환 (충분히 검증한 뒤에!)
 
 1. [업비트 OpenAPI](https://upbit.com/mypage/open_api_management)에서 키 발급

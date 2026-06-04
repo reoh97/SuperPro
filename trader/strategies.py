@@ -60,6 +60,12 @@ def _range_entry(row, s: dict, cfg: dict, fee: float) -> Entry:
 
     tp_pct = (tp_target - close) / close
     sl_pct = (close - sl_target) / close
+
+    # 빠른 익절: 박스 상단까지 안 기다리고, 수수료 조금 넘으면 바로 턴다(작게 자주).
+    quick = float(s.get("quick_tp_pct", 0.0))
+    if quick > 0:
+        tp_pct = min(tp_pct, max(_min_tp(cfg, fee), quick))
+
     if tp_pct < _min_tp(cfg, fee) or sl_pct <= 0:
         return _NO  # 상단까지 여유가 수수료보다 작거나 손절선이 위면 스킵
 

@@ -89,14 +89,6 @@ portfolio:
   tp_pct: 0.02               # 평단가 대비 익절(+2%)
   hard_sl_pct: 0.06          # 모든 트랜치 소진 후에만 작동하는 평단가 대비 방어 손절(-6%)
   max_hold_bars: 480         # 보유 한도(타임아웃 청산)
-circuit:                     # 목표 수익 서킷브레이커: 도달 시 전량청산 후 완전정지 + 텔레그램 알림
-  enabled: true
-  profit_target_pct: 1.1     # 기준선 대비 누적 수익률(%) 도달 시 발동 (첫 발동=초기자본 2,000만원 대비)
-                             #   재개 시 기준선을 '그때 평가액'으로 리셋 → 거기서 다시 +1.1% 목표
-telegram:                    # 목표 도달 알림. 토큰/챗ID는 .env 권장(TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)
-  enabled: true
-  bot_token: ''              # @BotFather 로 봇 생성 후 토큰 (환경변수가 우선)
-  chat_id: ''                # 봇과 대화 시작 후 getUpdates 의 chat.id
 paper:
   initial_krw: 1000000
 upbit:

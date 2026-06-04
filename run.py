@@ -17,7 +17,6 @@ import yaml
 from trader.ai_advisor import AIAdvisor
 from trader.live import LiveTrader
 from trader.news import NewsFeed
-from trader.notify import TelegramNotifier
 from web.app import create_app
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -55,9 +54,7 @@ def build_engine(cfg: dict) -> LiveTrader:
         cache_sec=int(ai_cfg.get("news_cache_sec", 900)),
         max_items=int(ai_cfg.get("news_max_items", 12)),
     )
-    notifier = TelegramNotifier(cfg)
-    return LiveTrader(cfg, advisor=advisor, news=news, state_path=state_path,
-                      notifier=notifier)
+    return LiveTrader(cfg, advisor=advisor, news=news, state_path=state_path)
 
 
 def main():
@@ -75,10 +72,6 @@ def main():
     else:
         why = engine.advisor.disabled_reason if engine.advisor else "비활성"
         print(f"AI 장세:   미사용 - {why}")
-    if engine.circuit_enabled:
-        tg = engine.notifier
-        tg_txt = "텔레그램 알림 ON" if (tg and tg.enabled) else f"텔레그램 미설정({tg.disabled_reason if tg else '-'})"
-        print(f"목표정지:  +{engine.target_pct:g}% 도달 시 전량청산·정지 — {tg_txt}")
     if mode == "live":
         print("⚠️ 주의: 새 멀티코인 엔진은 아직 '모의 회계'만 합니다. 실주문 미연결(안전).")
     print("대시보드:  http://127.0.0.1:8000\n")

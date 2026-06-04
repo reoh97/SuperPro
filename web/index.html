@@ -35,11 +35,6 @@
   .aiCard { border-width:2px; }
   .regChip { font-size:11px; padding:2px 7px; border-radius:6px; }
   .holdDot { color:#3fb950; } .flatDot { color:#56606b; }
-  .banner { display:none; margin:14px 0; padding:14px 16px; border-radius:10px;
-            background:#13301f; border:1px solid #2ea043; color:#d6f5e0; line-height:1.6; }
-  .banner.show { display:block; }
-  .banner b { color:#3fb950; }
-  button.resume { background:#1f6feb; }
 </style>
 </head>
 <body>
@@ -52,14 +47,6 @@
     <button id="startBtn" onclick="ctrl('start')">매매 시작</button>
     <button id="stopBtn" class="stop" onclick="ctrl('stop')">매매 정지</button>
     <span id="gate" class="badge off">-</span>
-    <span id="circuit" class="badge off" style="display:none">-</span>
-  </div>
-
-  <div id="banner" class="banner">
-    <div id="bannerText"></div>
-    <div style="margin-top:10px">
-      <button class="resume" onclick="ctrl('resume')">재개 (기준선 리셋)</button>
-    </div>
   </div>
 
   <div class="grid">
@@ -123,29 +110,6 @@ async function refresh() {
     const r = document.getElementById("realized");
     r.textContent = sign(t.realized); r.className = "value " + cls(t.realized);
     document.getElementById("budget").textContent = won(t.budget);
-
-    // 목표수익 서킷브레이커
-    const cc = s.circuit || {};
-    const cbadge = document.getElementById("circuit");
-    const banner = document.getElementById("banner");
-    if (cc.enabled) {
-      cbadge.style.display = "";
-      cbadge.textContent = `목표 +${cc.target_pct}% (현재 ${cc.ret_pct>=0?"+":""}${(cc.ret_pct||0).toFixed(2)}%)`;
-      cbadge.className = "badge " + (cc.target_hit ? "off" : "on");
-      const tgTxt = cc.telegram ? "텔레그램 알림 ON" : `텔레그램 미설정(${cc.telegram_reason||"-"})`;
-      if (cc.target_hit) {
-        banner.classList.add("show");
-        document.getElementById("bannerText").innerHTML =
-          `🎯 <b>목표 +${cc.target_pct}% 도달 → 전량 청산 후 매매 정지</b> (${cc.hit_at||""})<br>`
-          + `총 평가액 ${won(t.equity)} · 실현 ${sign(t.realized)} · ${tgTxt}<br>`
-          + `계속하려면 아래 [재개]를 누르세요. 기준선이 현재 평가액으로 리셋되어 거기서 다시 +${cc.target_pct}%를 노립니다.`;
-      } else {
-        banner.classList.remove("show");
-      }
-    } else {
-      cbadge.style.display = "none";
-      banner.classList.remove("show");
-    }
 
     // AI 시장국면
     const ai = s.ai_regime || {};

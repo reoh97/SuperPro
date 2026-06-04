@@ -28,7 +28,6 @@ from . import backtest, indicators, regime, strategies
 from .ai_advisor import AIAdvisor, RegimeView
 from .market import build_market_summary
 from .news import NewsFeed
-from .notify import TelegramNotifier
 
 
 def _now() -> str:
@@ -37,13 +36,11 @@ def _now() -> str:
 
 class LiveTrader:
     def __init__(self, cfg: dict, advisor: Optional[AIAdvisor] = None,
-                 news: Optional[NewsFeed] = None, state_path: str = "data/live_paper.json",
-                 notifier: Optional[TelegramNotifier] = None):
+                 news: Optional[NewsFeed] = None, state_path: str = "data/live_paper.json"):
         self.cfg = cfg
         self.advisor = advisor
         self.news = news
         self.state_path = state_path
-        self.notifier = notifier
 
         pcfg = cfg.get("portfolio", {})
         self.tickers: List[str] = list(pcfg.get("tickers", [cfg.get("ticker", "KRW-BTC")]))
@@ -76,15 +73,6 @@ class LiveTrader:
         self._ai_at: Optional[str] = None
         self._last_ai_ts: float = 0.0
 
-        # 목표수익 서킷브레이커
-        ccfg = cfg.get("circuit", {})
-        self.circuit_enabled = bool(ccfg.get("enabled", True))
-        self.target_pct = float(ccfg.get("profit_target_pct", 1.1))
-        self.total_budget = self.per_coin * len(self.tickers)
-        self._equity_base: float = self.total_budget   # 수익률 측정 기준선(재개 시 리셋)
-        self._target_hit: bool = False
-        self._target_hit_at: Optional[str] = None
-
         self._load()
 
     # ---------- 상태 영속화 ----------
@@ -103,10 +91,6 @@ class LiveTrader:
                 data = {}
         for tk in self.tickers:
             self.coins[tk] = {**self._fresh_coin(), **data.get(tk, {})}
-        meta = data.get("__meta__", {}) if isinstance(data, dict) else {}
-        self._equity_base = float(meta.get("equity_base", self.total_budget))
-        self._target_hit = bool(meta.get("target_hit", False))
-        self._target_hit_at = meta.get("target_hit_at")
 
     def _save(self):
         os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
@@ -116,9 +100,6 @@ class LiveTrader:
                         "position": c["position"], "trades": c["trades"][-100:],
                         "last_bar": c["last_bar"], "confirmed": c["confirmed"],
                         "streak_reg": c["streak_reg"], "streak": c["streak"]}
-        dump["__meta__"] = {"equity_base": self._equity_base,
-                            "target_hit": self._target_hit,
-                            "target_hit_at": self._target_hit_at}
         tmp = self.state_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(dump, f, ensure_ascii=False, indent=2)
@@ -152,7 +133,6 @@ class LiveTrader:
                 self._refresh_ai_regime()
                 for tk in self.tickers:
                     self._eval_coin(tk)
-                self._check_circuit()        # 목표수익 도달 시 전량청산+정지+알림
                 self._last_update = _now()
                 self._last_error = None
                 self._save()
@@ -206,67 +186,6 @@ class LiveTrader:
 
     def _entries_allowed(self) -> bool:
         return self._entry_policy()[0]
-
-    # ---------- 목표수익 서킷브레이커 ----------
-    def _totals(self):
-        """현재 총평가액·실현손익과, 기준선 대비 수익률(%)을 계산."""
-        equity = realized = 0.0
-        for tk in self.tickers:
-            c = self.coins[tk]
-            price = c.get("price")
-            p = c["position"]
-            coin_val = (price or 0.0) * (p["size"] if p else 0.0)
-            equity += c["cash"] + coin_val
-            realized += c["realized_pnl"]
-        base = self._equity_base or self.total_budget
-        ret = (equity - base) / base * 100 if base else 0.0
-        return equity, realized, ret
-
-    def _check_circuit(self):
-        """기준선 대비 수익률이 목표(예: +1.1%)에 도달하면:
-        보유 전량을 현재가로 청산 → 매매 완전정지 → 텔레그램 알림.
-        재개(resume)는 대시보드 [재개] 버튼에서. 재개 시 기준선이 리셋됨."""
-        if not self.circuit_enabled or self._target_hit or not self._running.is_set():
-            return
-        equity, _realized, ret = self._totals()
-        if ret < self.target_pct:
-            return
-        # 전량 청산(현재가). DOWN 즉시탈출과 동일하게 _sell 사용.
-        for tk in self.tickers:
-            c = self.coins[tk]
-            if c["position"] is not None and c.get("price"):
-                self._sell(tk, c["price"], "target")
-        self._target_hit = True
-        self._target_hit_at = _now()
-        self.disable()
-        final_equity, final_realized, final_ret = self._totals()
-        self._notify_target(final_equity, final_realized, final_ret)
-
-    def _notify_target(self, equity: float, realized: float, ret: float):
-        if self.notifier is None or not self.notifier.enabled:
-            return
-        mode = "실거래" if self.cfg.get("mode") == "live" else "모의"
-        msg = (
-            f"🎯 <b>목표 수익 도달 — 매매 정지</b> ({mode})\n"
-            f"수익률: <b>+{ret:.2f}%</b> (목표 +{self.target_pct:g}%)\n"
-            f"총 평가액: {equity:,.0f}원\n"
-            f"실현 손익: {realized:+,.0f}원\n"
-            f"기준선: {self._equity_base:,.0f}원\n"
-            f"시각: {self._target_hit_at}\n\n"
-            f"보유 전량 청산 후 신규매매를 멈췄습니다.\n"
-            f"계속하려면 대시보드에서 [재개]를 눌러주세요 "
-            f"(기준선이 현재 평가액으로 리셋되어 거기서 다시 +{self.target_pct:g}% 목표)."
-        )
-        self.notifier.send(msg)
-
-    def resume(self):
-        """목표 도달 정지 상태를 해제하고 매매 재개. 기준선을 현재 평가액으로 리셋."""
-        equity, _realized, _ret = self._totals()
-        self._equity_base = equity if equity > 0 else self.total_budget
-        self._target_hit = False
-        self._target_hit_at = None
-        self.enable()
-        self._save()
 
     # ---------- 종목 평가 ----------
     def _eval_coin(self, tk: str):
@@ -442,17 +361,6 @@ class LiveTrader:
                       "realized": total_realized,
                       "pnl": total_equity - total_budget,
                       "ret_pct": (total_equity - total_budget) / total_budget * 100 if total_budget else 0.0},
-            "circuit": {
-                "enabled": self.circuit_enabled,
-                "target_pct": self.target_pct,
-                "target_hit": self._target_hit,
-                "hit_at": self._target_hit_at,
-                "base": self._equity_base,
-                "ret_pct": ((total_equity - self._equity_base) / self._equity_base * 100
-                            if self._equity_base else 0.0),
-                "telegram": bool(self.notifier and self.notifier.enabled),
-                "telegram_reason": (self.notifier.disabled_reason if self.notifier else "미설정"),
-            },
             "ai_regime": {
                 "enabled": bool(self.advisor and self.advisor.enabled),
                 "regime": v.regime if v else None,

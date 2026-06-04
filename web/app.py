@@ -5,7 +5,6 @@
   GET  /api/status    현재 상태(JSON)
   POST /api/start     매매 활성화
   POST /api/stop      매매 비활성화
-  POST /api/resume    목표수익 정지 해제 + 재개(기준선 리셋)
 """
 from __future__ import annotations
 
@@ -39,15 +38,5 @@ def create_app(engine: Engine) -> FastAPI:
     def stop():
         engine.disable()
         return {"running": False}
-
-    @app.post("/api/resume")
-    def resume():
-        # 목표수익 도달로 멈춘 상태를 풀고 재개(기준선 리셋). LiveTrader만 지원.
-        fn = getattr(engine, "resume", None)
-        if callable(fn):
-            fn()
-            return {"running": engine.is_enabled()}
-        engine.enable()
-        return {"running": True}
 
     return app

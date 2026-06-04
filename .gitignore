@@ -1,0 +1,27 @@
+# 가상환경 (다른 PC에서 requirements.txt로 재설치)
+.venv/
+venv/
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+*.pyo
+
+# 비밀키 / 환경변수
+.env
+*.key
+
+# 모의/실거래 상태·잔고 (기기별로 따로 보관)
+data/
+state_*.json
+
+# 백테스트 출력 로그
+*_out.txt
+portfolio_out.txt
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/

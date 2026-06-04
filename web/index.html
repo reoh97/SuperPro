@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>업비트 자동매매 대시보드</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+         background:#0e1116; color:#e6e6e6; margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#8b949e; font-size:13px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+  .card { background:#171b22; border:1px solid #272d38; border-radius:10px; padding:14px 16px; }
+  .card .label { color:#8b949e; font-size:12px; }
+  .card .value { font-size:20px; font-weight:600; margin-top:4px; }
+  .pos { color:#3fb950; } .neg { color:#f85149; }
+  .row { display:flex; align-items:center; gap:12px; margin:18px 0; flex-wrap:wrap; }
+  button { background:#238636; color:#fff; border:0; padding:9px 18px; border-radius:8px;
+           font-size:14px; cursor:pointer; }
+  button.stop { background:#da3633; }
+  button:disabled { opacity:.5; cursor:default; }
+  .badge { padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+  .on { background:#143d2b; color:#3fb950; } .off { background:#3d1414; color:#f85149; }
+  .mode { background:#1f2a3d; color:#58a6ff; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+  th, td { text-align:right; padding:7px 10px; border-bottom:1px solid #21262d; }
+  th:first-child, td:first-child { text-align:left; }
+  .buy { color:#58a6ff; } .sell { color:#f0883e; }
+  .err { color:#f85149; font-size:12px; margin-top:8px; white-space:pre-wrap; }
+  .muted { color:#8b949e; }
+  h2 { font-size:15px; margin:24px 0 4px; }
+</style>
+</head>
+<body>
+  <h1>업비트 자동매매 <span id="mode" class="badge mode">-</span>
+      <span id="run" class="badge off">정지</span></h1>
+  <div class="sub">변동성 돌파 전략 · <span id="ticker">-</span> ·
+      마지막 갱신 <span id="updated" class="muted">-</span></div>
+
+  <div class="row">
+    <button id="startBtn" onclick="ctrl('start')">매매 시작</button>
+    <button id="stopBtn" class="stop" onclick="ctrl('stop')">매매 정지</button>
+    <span class="muted">현재가 <strong id="price">-</strong></span>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">총 평가자산</div><div class="value" id="equity">-</div></div>
+    <div class="card"><div class="label">보유 원화(KRW)</div><div class="value" id="krw">-</div></div>
+    <div class="card"><div class="label">코인 평가액</div><div class="value" id="coinval">-</div></div>
+    <div class="card"><div class="label">평균 매수가</div><div class="value" id="avg">-</div></div>
+    <div class="card"><div class="label">실현 손익</div><div class="value" id="realized">-</div></div>
+    <div class="card"><div class="label">평가 손익(미실현)</div><div class="value" id="unreal">-</div></div>
+  </div>
+
+  <h2>전략 상태</h2>
+  <div class="grid">
+    <div class="card"><div class="label">목표가(돌파선)</div><div class="value" id="target">-</div></div>
+    <div class="card"><div class="label">당일 시가</div><div class="value" id="open">-</div></div>
+    <div class="card"><div class="label">전일 변동폭</div><div class="value" id="range">-</div></div>
+    <div class="card"><div class="label">이동평균</div><div class="value" id="ma">-</div></div>
+    <div class="card"><div class="label">돌파 여부</div><div class="value" id="breakout">-</div></div>
+    <div class="card"><div class="label">매수 신호</div><div class="value" id="signal">-</div></div>
+  </div>
+  <div id="err" class="err"></div>
+
+  <h2>AI 뉴스 판단 <span id="aiBadge" class="badge off">-</span></h2>
+  <div class="card" id="aiCard">
+    <div class="label">AI 결정 <span id="aiModel" class="muted"></span> <span id="aiTime" class="muted"></span></div>
+    <div class="value" id="aiAction" style="margin-bottom:6px;">-</div>
+    <div id="aiReason" class="muted" style="font-size:13px; line-height:1.5;">차트가 매수 신호를 내면 AI가 영문 뉴스를 읽고 판단합니다.</div>
+  </div>
+
+  <h2>최근 거래</h2>
+  <table>
+    <thead><tr><th>시각</th><th>구분</th><th>체결가</th><th>수량</th><th>금액</th><th>손익</th></tr></thead>
+    <tbody id="trades"><tr><td colspan="6" class="muted">거래 없음</td></tr></tbody>
+  </table>
+
+<script>
+const won = n => (n==null) ? "-" : Math.round(n).toLocaleString("ko-KR") + "원";
+const num = (n,d=8) => (n==null) ? "-" : Number(n).toFixed(d).replace(/\.?0+$/,"");
+const cls = n => (n>0) ? "pos" : (n<0) ? "neg" : "";
+const sign = n => (n>0?"+":"") + won(n);
+
+async function refresh() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    document.getElementById("mode").textContent = s.mode === "live" ? "실거래" : "모의";
+    const run = document.getElementById("run");
+    run.textContent = s.running ? "가동중" : "정지";
+    run.className = "badge " + (s.running ? "on" : "off");
+    document.getElementById("startBtn").disabled = s.running;
+    document.getElementById("stopBtn").disabled = !s.running;
+    document.getElementById("ticker").textContent = s.ticker;
+    document.getElementById("updated").textContent = s.last_update || "-";
+    document.getElementById("price").textContent = won(s.current_price);
+
+    const p = s.portfolio;
+    document.getElementById("equity").textContent = won(p.total_equity);
+    document.getElementById("krw").textContent = won(p.krw);
+    document.getElementById("coinval").textContent = won(p.coin_value);
+    document.getElementById("avg").textContent = won(p.avg_price);
+    const r = document.getElementById("realized");
+    r.textContent = sign(p.realized_pnl); r.className = "value " + cls(p.realized_pnl);
+    const u = document.getElementById("unreal");
+    u.textContent = sign(p.unrealized_pnl); u.className = "value " + cls(p.unrealized_pnl);
+
+    const sig = s.signal;
+    if (sig) {
+      document.getElementById("target").textContent = won(sig.target_price);
+      document.getElementById("open").textContent = won(sig.today_open);
+      document.getElementById("range").textContent = won(sig.range_value);
+      document.getElementById("ma").textContent = sig.ma==null ? "미사용" : won(sig.ma);
+      const b = document.getElementById("breakout");
+      b.textContent = sig.breakout ? "돌파 ✔" : "대기"; b.className = "value " + (sig.breakout?"pos":"");
+      const g = document.getElementById("signal");
+      g.textContent = sig.should_buy ? "매수 ✔" : "관망"; g.className = "value " + (sig.should_buy?"pos":"");
+    }
+
+    document.getElementById("err").textContent = s.last_error ? ("오류: " + s.last_error) : "";
+
+    const ai = s.ai || {};
+    const aiBadge = document.getElementById("aiBadge");
+    aiBadge.textContent = ai.enabled ? "사용중" : "미사용";
+    aiBadge.className = "badge " + (ai.enabled ? "on" : "off");
+    document.getElementById("aiModel").textContent = ai.model ? ("· " + ai.model) : "";
+    document.getElementById("aiTime").textContent = ai.decided_at ? ("· " + ai.decided_at) : "";
+    const aiAction = document.getElementById("aiAction");
+    if (!ai.enabled) {
+      aiAction.textContent = "미사용";
+      aiAction.className = "value muted";
+      document.getElementById("aiReason").textContent = ai.disabled_reason || "AI 판단 비활성화됨";
+    } else if (ai.action) {
+      const buy = ai.action === "BUY";
+      const err = ai.action === "ERROR";
+      aiAction.textContent = err ? "오류" : (buy ? `매수 승인 (확신도 ${ai.confidence})` : `보류 (확신도 ${ai.confidence})`);
+      aiAction.className = "value " + (err ? "neg" : (buy ? "pos" : ""));
+      document.getElementById("aiReason").textContent = ai.reason || "";
+    } else {
+      aiAction.textContent = "대기 중";
+      aiAction.className = "value muted";
+      document.getElementById("aiReason").textContent = "아직 매수 신호가 없어 AI를 호출하지 않았습니다.";
+    }
+
+    const tb = document.getElementById("trades");
+    if (s.trades && s.trades.length) {
+      tb.innerHTML = s.trades.map(t => `<tr>
+        <td>${t.time}</td>
+        <td class="${t.side}">${t.side==="buy"?"매수":"매도"}</td>
+        <td>${won(t.price)}</td>
+        <td>${num(t.volume)}</td>
+        <td>${won(t.amount)}</td>
+        <td class="${cls(t.pnl)}">${t.pnl==null?"-":sign(t.pnl)}</td>
+      </tr>`).join("");
+    } else {
+      tb.innerHTML = '<tr><td colspan="6" class="muted">거래 없음</td></tr>';
+    }
+  } catch (e) {
+    document.getElementById("err").textContent = "서버 연결 실패: " + e;
+  }
+}
+async function ctrl(action) {
+  await fetch("/api/" + action, { method: "POST" });
+  refresh();
+}
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

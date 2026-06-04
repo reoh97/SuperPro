@@ -1,0 +1,83 @@
+mode: paper
+ticker: KRW-BTC
+strategy:
+  k: 0.5
+  ma_period: 5
+trade:
+  invest_ratio: 0.5
+  fee: 0.0005
+  min_order_krw: 5000
+loop:
+  interval_sec: 10
+ai:
+  enabled: true
+  model: claude-haiku-4-5
+  min_confidence: 60
+  min_interval_sec: 900
+  news_max_items: 12
+  news_cache_sec: 900
+news_feeds:
+- https://www.coindesk.com/arc/outboundfeeds/rss/
+- https://cointelegraph.com/rss
+- https://decrypt.co/feed
+timeframe_min: 15
+indicators:
+  ema_fast: 20
+  ema_mid: 50
+  ema_slow: 200
+  rsi: 14
+  atr: 14
+  adx: 14
+  bb: 20
+  bb_mult: 2.0
+regime:
+  adx_trend: 20
+scalp:
+  min_profit_buffer: 0.002
+  max_hold_bars: 480
+  confirm_bars: 3
+  uptrend:                   # 상승장: 추세 타고 5~6%+ 먹기 → 청산 후 재진입 반복
+    sl_pct: 0.02             # 초기 손절 -2%
+    trail_pct: 0.025         # 고점 대비 -2.5% 되돌림에 청산(승자를 길게 끌어 5~6%+ 포착)
+    enabled: true
+  sideways:                  # 횡보장: 박스권 반복 신호 발라먹기(여러 번 왕복)
+    mode: range
+    box_lookback: 40
+    min_box_pct: 0.015
+    max_box_pct: 0.06
+    entry_zone: 0.25
+    tp_zone: 0.9             # 박스 상단 가까이까지 익절폭 확보
+    sl_below: 0.004
+    tp_pct: 0.005
+    sl_pct: 0.004
+    rsi_buy: 32
+    require_above_slow: true
+  downtrend:                 # 하락장: 거래 적게, 과매도 반등에서 2~3% 목표
+    enabled: true
+    tp_pct: 0.025            # +2.5% 목표
+    sl_pct: 0.015
+    rsi_buy: 27
+portfolio:
+  total_krw: 20000000        # 총자본 2,000만원
+  per_coin_krw: 2000000      # 종목당 200만원
+  tickers:                   # 원화마켓 시총/거래량 상위 메이저 10
+  - KRW-BTC
+  - KRW-ETH
+  - KRW-XRP
+  - KRW-SOL
+  - KRW-ADA
+  - KRW-DOGE
+  - KRW-TRX
+  - KRW-LINK
+  - KRW-AVAX
+  - KRW-DOT
+  tranches: 5                # 5분할 균등 (종목당 40만원씩 5번)
+  add_drop_pct: 0.02         # 추가매수 트리거: 직전 진입가 대비 -2% 이상 하락 + 신호 재확인(둘 혼합)
+  tp_pct: 0.02               # 평단가 대비 익절(+2%)
+  hard_sl_pct: 0.06          # 모든 트랜치 소진 후에만 작동하는 평단가 대비 방어 손절(-6%)
+  max_hold_bars: 480         # 보유 한도(타임아웃 청산)
+paper:
+  initial_krw: 1000000
+upbit:
+  access_key: ''
+  secret_key: ''

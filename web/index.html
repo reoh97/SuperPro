@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>업비트 자동매매 대시보드</title>
+<title>업비트 멀티코인 자동매매</title>
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
          background:#0e1116; color:#e6e6e6; margin:0; padding:24px; }
   h1 { font-size:20px; margin:0 0 4px; }
-  .sub { color:#8b949e; font-size:13px; margin-bottom:20px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
+  .sub { color:#8b949e; font-size:13px; margin-bottom:18px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
   .card { background:#171b22; border:1px solid #272d38; border-radius:10px; padding:14px 16px; }
   .card .label { color:#8b949e; font-size:12px; }
   .card .value { font-size:20px; font-weight:600; margin-top:4px; }
   .pos { color:#3fb950; } .neg { color:#f85149; }
-  .row { display:flex; align-items:center; gap:12px; margin:18px 0; flex-wrap:wrap; }
+  .row { display:flex; align-items:center; gap:12px; margin:16px 0; flex-wrap:wrap; }
   button { background:#238636; color:#fff; border:0; padding:9px 18px; border-radius:8px;
            font-size:14px; cursor:pointer; }
   button.stop { background:#da3633; }
@@ -23,6 +23,8 @@
   .badge { padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; }
   .on { background:#143d2b; color:#3fb950; } .off { background:#3d1414; color:#f85149; }
   .mode { background:#1f2a3d; color:#58a6ff; }
+  .bull { background:#143d2b; color:#3fb950; } .side { background:#3d3414; color:#e3b341; }
+  .bear { background:#3d1414; color:#f85149; }
   table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
   th, td { text-align:right; padding:7px 10px; border-bottom:1px solid #21262d; }
   th:first-child, td:first-child { text-align:left; }
@@ -30,58 +32,60 @@
   .err { color:#f85149; font-size:12px; margin-top:8px; white-space:pre-wrap; }
   .muted { color:#8b949e; }
   h2 { font-size:15px; margin:24px 0 4px; }
+  .aiCard { border-width:2px; }
+  .regChip { font-size:11px; padding:2px 7px; border-radius:6px; }
+  .holdDot { color:#3fb950; } .flatDot { color:#56606b; }
 </style>
 </head>
 <body>
-  <h1>업비트 자동매매 <span id="mode" class="badge mode">-</span>
+  <h1>업비트 멀티코인 자동매매
+      <span id="mode" class="badge mode">-</span>
       <span id="run" class="badge off">정지</span></h1>
-  <div class="sub">변동성 돌파 전략 · <span id="ticker">-</span> ·
-      마지막 갱신 <span id="updated" class="muted">-</span></div>
+  <div class="sub">국면별 전략 + 분할매수 · AI 장세 게이트 · 마지막 갱신 <span id="updated" class="muted">-</span></div>
 
   <div class="row">
     <button id="startBtn" onclick="ctrl('start')">매매 시작</button>
     <button id="stopBtn" class="stop" onclick="ctrl('stop')">매매 정지</button>
-    <span class="muted">현재가 <strong id="price">-</strong></span>
+    <span id="gate" class="badge off">-</span>
   </div>
 
   <div class="grid">
     <div class="card"><div class="label">총 평가자산</div><div class="value" id="equity">-</div></div>
-    <div class="card"><div class="label">보유 원화(KRW)</div><div class="value" id="krw">-</div></div>
-    <div class="card"><div class="label">코인 평가액</div><div class="value" id="coinval">-</div></div>
-    <div class="card"><div class="label">평균 매수가</div><div class="value" id="avg">-</div></div>
+    <div class="card"><div class="label">총 손익</div><div class="value" id="pnl">-</div></div>
     <div class="card"><div class="label">실현 손익</div><div class="value" id="realized">-</div></div>
-    <div class="card"><div class="label">평가 손익(미실현)</div><div class="value" id="unreal">-</div></div>
+    <div class="card"><div class="label">배정 자본</div><div class="value" id="budget">-</div></div>
   </div>
 
-  <h2>전략 상태</h2>
-  <div class="grid">
-    <div class="card"><div class="label">목표가(돌파선)</div><div class="value" id="target">-</div></div>
-    <div class="card"><div class="label">당일 시가</div><div class="value" id="open">-</div></div>
-    <div class="card"><div class="label">전일 변동폭</div><div class="value" id="range">-</div></div>
-    <div class="card"><div class="label">이동평균</div><div class="value" id="ma">-</div></div>
-    <div class="card"><div class="label">돌파 여부</div><div class="value" id="breakout">-</div></div>
-    <div class="card"><div class="label">매수 신호</div><div class="value" id="signal">-</div></div>
+  <h2>AI 시장국면 <span id="aiBadge" class="badge off">-</span></h2>
+  <div class="card aiCard" id="aiCard">
+    <div class="label">AI 판단 <span id="aiTime" class="muted"></span></div>
+    <div class="value" id="aiRegime" style="margin-bottom:6px;">-</div>
+    <div id="aiReason" class="muted" style="font-size:13px; line-height:1.5;">
+      비트코인 차트 + 영문 뉴스를 종합해 AI가 장세를 판단합니다. (BEAR/위험 시 신규매수 자동 중단)</div>
   </div>
+
+  <h2>종목별 현황</h2>
+  <table>
+    <thead><tr>
+      <th>종목</th><th>현재가</th><th>국면</th><th>보유</th>
+      <th>평단</th><th>분할</th><th>평가손익</th><th>실현</th><th>평가액</th>
+    </tr></thead>
+    <tbody id="coins"><tr><td colspan="9" class="muted">로딩...</td></tr></tbody>
+  </table>
   <div id="err" class="err"></div>
-
-  <h2>AI 뉴스 판단 <span id="aiBadge" class="badge off">-</span></h2>
-  <div class="card" id="aiCard">
-    <div class="label">AI 결정 <span id="aiModel" class="muted"></span> <span id="aiTime" class="muted"></span></div>
-    <div class="value" id="aiAction" style="margin-bottom:6px;">-</div>
-    <div id="aiReason" class="muted" style="font-size:13px; line-height:1.5;">차트가 매수 신호를 내면 AI가 영문 뉴스를 읽고 판단합니다.</div>
-  </div>
 
   <h2>최근 거래</h2>
   <table>
-    <thead><tr><th>시각</th><th>구분</th><th>체결가</th><th>수량</th><th>금액</th><th>손익</th></tr></thead>
-    <tbody id="trades"><tr><td colspan="6" class="muted">거래 없음</td></tr></tbody>
+    <thead><tr><th>시각</th><th>종목</th><th>구분</th><th>체결가</th><th>금액</th><th>손익</th><th>사유</th></tr></thead>
+    <tbody id="trades"><tr><td colspan="7" class="muted">거래 없음</td></tr></tbody>
   </table>
 
 <script>
 const won = n => (n==null) ? "-" : Math.round(n).toLocaleString("ko-KR") + "원";
-const num = (n,d=8) => (n==null) ? "-" : Number(n).toFixed(d).replace(/\.?0+$/,"");
 const cls = n => (n>0) ? "pos" : (n<0) ? "neg" : "";
-const sign = n => (n>0?"+":"") + won(n);
+const sign = n => (n==null) ? "-" : (n>0?"+":"") + won(n);
+const REG = { UP:["상승","bull"], SIDEWAYS:["횡보","side"], DOWN:["하락","bear"] };
+const MKT = { BULL:["🟢 상승장","bull"], SIDEWAYS:["🟡 횡보장","side"], BEAR:["🔴 하락장","bear"] };
 
 async function refresh() {
   try {
@@ -92,69 +96,85 @@ async function refresh() {
     run.className = "badge " + (s.running ? "on" : "off");
     document.getElementById("startBtn").disabled = s.running;
     document.getElementById("stopBtn").disabled = !s.running;
-    document.getElementById("ticker").textContent = s.ticker;
     document.getElementById("updated").textContent = s.last_update || "-";
-    document.getElementById("price").textContent = won(s.current_price);
 
-    const p = s.portfolio;
-    document.getElementById("equity").textContent = won(p.total_equity);
-    document.getElementById("krw").textContent = won(p.krw);
-    document.getElementById("coinval").textContent = won(p.coin_value);
-    document.getElementById("avg").textContent = won(p.avg_price);
+    const gate = document.getElementById("gate");
+    gate.textContent = s.entries_allowed ? "신규매수 허용" : "신규매수 중단(현금보존)";
+    gate.className = "badge " + (s.entries_allowed ? "on" : "off");
+
+    const t = s.total || {};
+    document.getElementById("equity").textContent = won(t.equity);
+    const pnl = document.getElementById("pnl");
+    pnl.textContent = sign(t.pnl) + (t.ret_pct!=null ? `  (${t.ret_pct>=0?"+":""}${t.ret_pct.toFixed(2)}%)` : "");
+    pnl.className = "value " + cls(t.pnl);
     const r = document.getElementById("realized");
-    r.textContent = sign(p.realized_pnl); r.className = "value " + cls(p.realized_pnl);
-    const u = document.getElementById("unreal");
-    u.textContent = sign(p.unrealized_pnl); u.className = "value " + cls(p.unrealized_pnl);
+    r.textContent = sign(t.realized); r.className = "value " + cls(t.realized);
+    document.getElementById("budget").textContent = won(t.budget);
 
-    const sig = s.signal;
-    if (sig) {
-      document.getElementById("target").textContent = won(sig.target_price);
-      document.getElementById("open").textContent = won(sig.today_open);
-      document.getElementById("range").textContent = won(sig.range_value);
-      document.getElementById("ma").textContent = sig.ma==null ? "미사용" : won(sig.ma);
-      const b = document.getElementById("breakout");
-      b.textContent = sig.breakout ? "돌파 ✔" : "대기"; b.className = "value " + (sig.breakout?"pos":"");
-      const g = document.getElementById("signal");
-      g.textContent = sig.should_buy ? "매수 ✔" : "관망"; g.className = "value " + (sig.should_buy?"pos":"");
+    // AI 시장국면
+    const ai = s.ai_regime || {};
+    const aiBadge = document.getElementById("aiBadge");
+    aiBadge.textContent = ai.enabled ? "사용중" : "미사용";
+    aiBadge.className = "badge " + (ai.enabled ? "on" : "off");
+    document.getElementById("aiTime").textContent = ai.decided_at ? ("· " + ai.decided_at) : "";
+    const aiReg = document.getElementById("aiRegime");
+    const card = document.getElementById("aiCard");
+    if (!ai.enabled) {
+      aiReg.textContent = "미사용"; aiReg.className = "value muted";
+      document.getElementById("aiReason").textContent = ai.disabled_reason || "AI 장세판단 비활성화";
+      card.style.borderColor = "#272d38";
+    } else if (ai.regime && MKT[ai.regime]) {
+      const [txt, c] = MKT[ai.regime];
+      aiReg.innerHTML = `${txt} <span class="muted" style="font-size:13px">확신도 ${ai.confidence}%</span>`
+        + (ai.risk_off ? ` <span class="badge bear">⚠️ 위험회피</span>` : "");
+      aiReg.className = "value";
+      document.getElementById("aiReason").textContent = ai.reason || "";
+      card.style.borderColor = c==="bull"?"#238636":c==="bear"?"#da3633":"#9e7e1f";
+    } else {
+      aiReg.textContent = "판단 대기..."; aiReg.className = "value muted";
+      card.style.borderColor = "#272d38";
+    }
+
+    // 종목별
+    const cb = document.getElementById("coins");
+    const allTrades = [];
+    if (s.coins && s.coins.length) {
+      cb.innerHTML = s.coins.map(c => {
+        (c.recent_trades||[]).forEach(x => allTrades.push({...x, ticker:c.ticker}));
+        const [rt, rc] = REG[c.confirmed] || ["-","muted"];
+        return `<tr>
+          <td><strong>${c.ticker.replace("KRW-","")}</strong></td>
+          <td>${won(c.price)}</td>
+          <td><span class="regChip ${rc}">${rt}</span></td>
+          <td>${c.has_position ? `<span class="holdDot">●</span> ${c.exit_mode||""}` : '<span class="flatDot">○</span>'}</td>
+          <td>${c.has_position ? won(c.avg_price) : "-"}</td>
+          <td>${c.has_position ? (c.tranches_used+"회") : "-"}</td>
+          <td class="${cls(c.unrealized)}">${c.has_position ? sign(c.unrealized) : "-"}</td>
+          <td class="${cls(c.realized)}">${sign(c.realized)}</td>
+          <td>${won(c.equity)}</td>
+        </tr>`;
+      }).join("");
+    } else {
+      cb.innerHTML = '<tr><td colspan="9" class="muted">종목 없음</td></tr>';
     }
 
     document.getElementById("err").textContent = s.last_error ? ("오류: " + s.last_error) : "";
 
-    const ai = s.ai || {};
-    const aiBadge = document.getElementById("aiBadge");
-    aiBadge.textContent = ai.enabled ? "사용중" : "미사용";
-    aiBadge.className = "badge " + (ai.enabled ? "on" : "off");
-    document.getElementById("aiModel").textContent = ai.model ? ("· " + ai.model) : "";
-    document.getElementById("aiTime").textContent = ai.decided_at ? ("· " + ai.decided_at) : "";
-    const aiAction = document.getElementById("aiAction");
-    if (!ai.enabled) {
-      aiAction.textContent = "미사용";
-      aiAction.className = "value muted";
-      document.getElementById("aiReason").textContent = ai.disabled_reason || "AI 판단 비활성화됨";
-    } else if (ai.action) {
-      const buy = ai.action === "BUY";
-      const err = ai.action === "ERROR";
-      aiAction.textContent = err ? "오류" : (buy ? `매수 승인 (확신도 ${ai.confidence})` : `보류 (확신도 ${ai.confidence})`);
-      aiAction.className = "value " + (err ? "neg" : (buy ? "pos" : ""));
-      document.getElementById("aiReason").textContent = ai.reason || "";
-    } else {
-      aiAction.textContent = "대기 중";
-      aiAction.className = "value muted";
-      document.getElementById("aiReason").textContent = "아직 매수 신호가 없어 AI를 호출하지 않았습니다.";
-    }
-
+    // 최근 거래(전 종목 합산, 시간 역순)
+    allTrades.sort((a,b) => (a.time<b.time?1:-1));
     const tb = document.getElementById("trades");
-    if (s.trades && s.trades.length) {
-      tb.innerHTML = s.trades.map(t => `<tr>
-        <td>${t.time}</td>
-        <td class="${t.side}">${t.side==="buy"?"매수":"매도"}</td>
-        <td>${won(t.price)}</td>
-        <td>${num(t.volume)}</td>
-        <td>${won(t.amount)}</td>
-        <td class="${cls(t.pnl)}">${t.pnl==null?"-":sign(t.pnl)}</td>
+    if (allTrades.length) {
+      tb.innerHTML = allTrades.slice(0,15).map(x => `<tr>
+        <td>${x.time}</td>
+        <td>${x.ticker.replace("KRW-","")}</td>
+        <td class="${x.side}">${x.side==="buy"?"매수":"매도"}</td>
+        <td>${won(x.price)}</td>
+        <td>${won(x.amount)}</td>
+        <td class="${cls(x.pnl)}">${x.pnl==null?"-":sign(x.pnl)}</td>
+        <td class="muted">${x.reason||""}</td>
       </tr>`).join("");
     } else {
-      tb.innerHTML = '<tr><td colspan="6" class="muted">거래 없음</td></tr>';
+      tb.innerHTML = '<tr><td colspan="7" class="muted">거래 없음</td></tr>';
     }
   } catch (e) {
     document.getElementById("err").textContent = "서버 연결 실패: " + e;

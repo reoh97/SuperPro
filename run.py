@@ -15,10 +15,8 @@ import uvicorn
 import yaml
 
 from trader.ai_advisor import AIAdvisor
-from trader.broker import LiveBroker, PaperBroker
-from trader.engine import Engine
+from trader.live import LiveTrader
 from trader.news import NewsFeed
-from trader.state import StateStore
 from web.app import create_app
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -44,25 +42,11 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def build_engine(cfg: dict) -> Engine:
+def build_engine(cfg: dict) -> LiveTrader:
     mode = cfg.get("mode", "paper")
-    fee = float(cfg["trade"]["fee"])
+    # 모드별 상태 파일 분리 (모의/실거래 혼동 방지)
+    state_path = os.path.join(BASE, "data", f"live_{mode}.json")
 
-    # 모드별로 상태 파일 분리 (모의/실거래 잔고 혼동 방지)
-    state_path = os.path.join(BASE, "data", f"state_{mode}.json")
-    store = StateStore(state_path)
-    store.load(default_krw=float(cfg["paper"]["initial_krw"]))
-
-    if mode == "live":
-        broker = LiveBroker(
-            access_key=cfg["upbit"].get("access_key", ""),
-            secret_key=cfg["upbit"].get("secret_key", ""),
-            ticker=cfg["ticker"], store=store, fee=fee,
-        )
-    else:
-        broker = PaperBroker(store=store, fee=fee)
-
-    # AI 뉴스 판단 구성
     ai_cfg = cfg.get("ai", {})
     advisor = AIAdvisor(cfg)
     news = NewsFeed(
@@ -70,23 +54,26 @@ def build_engine(cfg: dict) -> Engine:
         cache_sec=int(ai_cfg.get("news_cache_sec", 900)),
         max_items=int(ai_cfg.get("news_max_items", 12)),
     )
-    return Engine(cfg, store, broker, advisor=advisor, news=news)
+    return LiveTrader(cfg, advisor=advisor, news=news, state_path=state_path)
 
 
 def main():
     load_dotenv(os.path.join(BASE, ".env"))   # ANTHROPIC_API_KEY 등 로드
     cfg = load_config(os.path.join(BASE, "config.yaml"))
+    mode = cfg.get("mode", "paper")
     engine = build_engine(cfg)
-    engine.start_loop()   # 시세 평가 루프 기동 (매매는 대시보드에서 활성화)
+    engine.start_loop()   # 시세/국면 평가 루프 기동 (매매는 대시보드에서 활성화)
 
     app = create_app(engine)
-    mode = cfg.get("mode", "paper")
-    print(f"\n[ 업비트 자동매매 - {('실거래' if mode=='live' else '모의')} 모드 ]")
+    print(f"\n[ 업비트 자동매매 - 멀티코인 국면별 ({('실거래' if mode=='live' else '모의')} 모드) ]")
+    print(f"종목:      {len(engine.tickers)}개  (각 {engine.per_coin:,.0f}원 / {engine.n_tranche}분할)")
     if engine.advisor and engine.advisor.enabled:
-        print(f"AI 판단:   사용 ({engine.advisor.model})")
+        print(f"AI 장세:   사용 ({engine.advisor.model}) — BEAR/risk_off시 신규매수 중단")
     else:
         why = engine.advisor.disabled_reason if engine.advisor else "비활성"
-        print(f"AI 판단:   미사용 - {why}")
+        print(f"AI 장세:   미사용 - {why}")
+    if mode == "live":
+        print("⚠️ 주의: 새 멀티코인 엔진은 아직 '모의 회계'만 합니다. 실주문 미연결(안전).")
     print("대시보드:  http://127.0.0.1:8000\n")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
 

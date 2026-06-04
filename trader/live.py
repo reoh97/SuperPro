@@ -1,0 +1,342 @@
+"""멀티코인 라이브 트레이딩 엔진 (모의 우선).
+
+백테스트로 검증한 로직을 실시간으로 이식:
+  - 종목별 독립 예산(per_coin_krw)·포지션·현금
+  - 국면별 전략(상승=트레일링, 횡보=박스 빠른익절, 하락=관망/단타) + 분할매수
+  - DOWN 확정전환 시 즉시 탈출
+  - **AI 시장국면 게이트**: AI가 BEAR/risk_off로 보면 신규매수 중단(현금 보존)
+
+백테스트와의 차이(라이브 특성):
+  - 닫힌 봉(직전 15m봉)으로 신호/지표/국면을 판단하고, 청산은 '현재가'로 매 루프 감시
+  - 진입/추가/보유봉수 갱신은 '새 봉이 닫혔을 때' 1회만 (같은 봉 중복매매 방지)
+
+주의: 기본 paper(모의). live(실거래)는 향후 종목별 주문 연결 필요(현재 미구현).
+"""
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+import traceback
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import pyupbit
+
+from . import backtest, indicators, regime, strategies
+from .ai_advisor import AIAdvisor, RegimeView
+from .market import build_market_summary
+from .news import NewsFeed
+
+
+def _now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+class LiveTrader:
+    def __init__(self, cfg: dict, advisor: Optional[AIAdvisor] = None,
+                 news: Optional[NewsFeed] = None, state_path: str = "data/live_paper.json"):
+        self.cfg = cfg
+        self.advisor = advisor
+        self.news = news
+        self.state_path = state_path
+
+        pcfg = cfg.get("portfolio", {})
+        self.tickers: List[str] = list(pcfg.get("tickers", [cfg.get("ticker", "KRW-BTC")]))
+        self.per_coin = float(pcfg.get("per_coin_krw", 2000000))
+        self.n_tranche = int(pcfg.get("tranches", 4))
+        self.add_drop = float(pcfg.get("add_drop_pct", 0.02))
+        self.hard_sl = float(pcfg.get("hard_sl_pct", 0.06))
+        self.max_hold = int(pcfg.get("max_hold_bars", 480))
+        self.fee = float(cfg["trade"]["fee"])
+        self.unit = int(cfg.get("timeframe_min", 15))
+        self.confirm_bars = int(cfg.get("scalp", {}).get("confirm_bars", 3))
+        self.market_ticker = cfg.get("ticker", "KRW-BTC")  # AI 장세판단 대표코인
+
+        # 종목별 상태: {ticker: {...}}
+        self.coins: Dict[str, dict] = {}
+
+        self._thread: Optional[threading.Thread] = None
+        self._running = threading.Event()
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._last_error: Optional[str] = None
+        self._last_update: Optional[str] = None
+
+        # AI 시장국면
+        self._ai_view: Optional[RegimeView] = None
+        self._ai_at: Optional[str] = None
+        self._last_ai_ts: float = 0.0
+
+        self._load()
+
+    # ---------- 상태 영속화 ----------
+    def _fresh_coin(self) -> dict:
+        return {"cash": self.per_coin, "realized_pnl": 0.0, "position": None,
+                "trades": [], "last_bar": None, "confirmed": regime.SIDEWAYS,
+                "streak_reg": None, "streak": 0, "price": None, "reg_raw": None}
+
+    def _load(self):
+        data = {}
+        if os.path.exists(self.state_path):
+            try:
+                with open(self.state_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+        for tk in self.tickers:
+            self.coins[tk] = {**self._fresh_coin(), **data.get(tk, {})}
+
+    def _save(self):
+        os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
+        dump = {}
+        for tk, c in self.coins.items():
+            dump[tk] = {"cash": c["cash"], "realized_pnl": c["realized_pnl"],
+                        "position": c["position"], "trades": c["trades"][-100:],
+                        "last_bar": c["last_bar"], "confirmed": c["confirmed"],
+                        "streak_reg": c["streak_reg"], "streak": c["streak"]}
+        tmp = self.state_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(dump, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, self.state_path)
+
+    # ---------- 스레드 제어 ----------
+    def start_loop(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def enable(self):
+        self._running.set()
+
+    def disable(self):
+        self._running.clear()
+
+    def shutdown(self):
+        self._stop.set()
+
+    def is_enabled(self) -> bool:
+        return self._running.is_set()
+
+    # ---------- 메인 루프 ----------
+    def _run(self):
+        interval = max(float(self.cfg["loop"]["interval_sec"]), 5)
+        while not self._stop.is_set():
+            try:
+                self._refresh_ai_regime()
+                for tk in self.tickers:
+                    self._eval_coin(tk)
+                self._last_update = _now()
+                self._last_error = None
+                self._save()
+            except Exception:
+                self._last_error = traceback.format_exc(limit=3)
+            for _ in range(int(interval)):
+                if self._stop.is_set():
+                    break
+                time.sleep(1)
+
+    # ---------- AI 시장국면 ----------
+    def _refresh_ai_regime(self):
+        if self.advisor is None or not self.advisor.enabled:
+            return
+        ai_cfg = self.cfg.get("ai", {})
+        cooldown = float(ai_cfg.get("regime_interval_sec", ai_cfg.get("min_interval_sec", 900)))
+        now = time.time()
+        if self._ai_view is not None and (now - self._last_ai_ts) < cooldown:
+            return
+        df = backtest.fetch_minutes(self.market_ticker, self.unit, 200)
+        if df is None or len(df) < 60:
+            return
+        summary = build_market_summary(df, self.cfg)
+        headlines = self.news.latest() if self.news else []
+        view = self.advisor.decide_regime(summary, headlines)
+        with self._lock:
+            self._ai_view = view
+            self._ai_at = _now()
+        self._last_ai_ts = now
+
+    def _entries_allowed(self) -> bool:
+        """AI 장세 게이트: BEAR/risk_off면 신규매수 중단(현금 보존). 그 외/비활성은 허용."""
+        v = self._ai_view
+        if v is None or v.regime == "ERROR":
+            return True   # AI 없거나 오류 → 차트 신호만으로 진행(fail-open)
+        if v.risk_off or v.regime == "BEAR":
+            return False
+        return True
+
+    # ---------- 종목 평가 ----------
+    def _eval_coin(self, tk: str):
+        c = self.coins[tk]
+        df = backtest.fetch_minutes(tk, self.unit, 200)
+        price = pyupbit.get_current_price(tk)
+        if df is None or len(df) < 60 or not price:
+            return
+        d = indicators.enrich(df, self.cfg)
+        if len(d) < 3:
+            return
+        row, prev = d.iloc[-2], d.iloc[-3]      # 직전 '닫힌' 봉으로 신호 판단
+        bar_id = str(d.index[-2])
+        c["price"] = float(price)
+
+        new_bar = (c["last_bar"] != bar_id)
+        if new_bar:
+            # 확정 국면 갱신(휩쏘 방지)
+            raw = regime.classify(row, self.cfg)
+            c["reg_raw"] = raw
+            if raw == c["streak_reg"]:
+                c["streak"] += 1
+            else:
+                c["streak_reg"], c["streak"] = raw, 1
+            if c["streak"] >= self.confirm_bars:
+                c["confirmed"] = raw
+            c["last_bar"] = bar_id
+
+        # 매매 비활성(정지) 시: 시세·국면만 갱신하고 주문은 내지 않음
+        if not self._running.is_set():
+            return
+
+        confirmed = c["confirmed"]
+        pos = c["position"]
+        sig = strategies.evaluate(prev, row, confirmed, self.cfg, self.fee)
+
+        # ----- 보유 중: 청산 감시(매 루프, 현재가 기준) -----
+        if pos is not None:
+            if new_bar:
+                pos["bars_held"] += 1
+            avg = pos["cost"] / pos["size"]
+
+            # DOWN 확정전환 → 즉시 탈출
+            if confirmed == regime.DOWN and pos["regime"] != regime.DOWN:
+                self._sell(tk, price, "regime"); return
+
+            mode = pos["exit_mode"]
+            if mode == "trail":
+                pos["peak"] = max(pos["peak"], float(price))
+                stop = max(pos["sl_price"], pos["peak"] * (1 - pos["trail_pct"]))
+                if price <= stop:
+                    self._sell(tk, price, "trail"); return
+            elif mode == "scalp":
+                if price <= pos["sl_price"]:
+                    self._sell(tk, price, "sl"); return
+                if price >= avg * (1 + pos["tp_pct"]):
+                    self._sell(tk, price, "tp"); return
+                if pos["bars_held"] >= self.max_hold:
+                    self._sell(tk, price, "timeout"); return
+            else:  # fixed (분할매수)
+                if pos["used"] >= self.n_tranche and price <= avg * (1 - self.hard_sl):
+                    self._sell(tk, price, "sl"); return
+                if price >= avg * (1 + pos["tp_pct"]):
+                    self._sell(tk, price, "tp"); return
+                if pos["bars_held"] >= self.max_hold:
+                    self._sell(tk, price, "timeout"); return
+
+            # 추가매수(fixed, 새 봉에서만): 직전가 -add_drop 이상 하락 + 신호 + AI 허용
+            if (new_bar and mode == "fixed" and pos["used"] < self.n_tranche
+                    and sig.should_enter and price <= pos["last_entry"] * (1 - self.add_drop)
+                    and self._entries_allowed()):
+                self._buy(tk, price, sig, add=True)
+            return
+
+        # ----- 미보유: 새 봉에서 신호 + AI 게이트 통과 시 진입 -----
+        if new_bar and sig.should_enter and self._entries_allowed():
+            self._buy(tk, price, sig, add=False)
+
+    # ---------- 체결(모의) ----------
+    def _tranche_krw(self) -> float:
+        return self.per_coin / self.n_tranche
+
+    def _buy(self, tk: str, price: float, sig, add: bool):
+        c = self.coins[tk]
+        spend = min(self._tranche_krw(), c["cash"])
+        if spend <= 0 or price <= 0:
+            return
+        fee = spend * self.fee
+        vol = (spend - fee) / price
+        c["cash"] -= spend
+        if add and c["position"] is not None:
+            p = c["position"]
+            p["size"] += vol
+            p["cost"] += spend - fee
+            p["fees"] += fee
+            p["used"] += 1
+            p["last_entry"] = price
+        else:
+            c["position"] = {
+                "size": vol, "cost": spend - fee, "fees": fee, "used": 1,
+                "last_entry": price, "entry_time": _now(), "bars_held": 0,
+                "regime": c["confirmed"], "exit_mode": sig.exit_mode,
+                "tp_pct": sig.tp_pct, "trail_pct": sig.trail_pct,
+                "sl_price": price * (1 - sig.sl_pct), "peak": price,
+            }
+        c["trades"].append({"time": _now(), "side": "buy", "price": price,
+                            "volume": vol, "amount": spend, "fee": fee,
+                            "reason": sig.reason})
+
+    def _sell(self, tk: str, price: float, reason: str):
+        c = self.coins[tk]
+        p = c["position"]
+        if p is None:
+            return
+        vol = p["size"]
+        gross = price * vol
+        fee = gross * self.fee
+        c["cash"] += gross - fee
+        net = (gross - fee) - (p["cost"] + p["fees"])
+        c["realized_pnl"] += net
+        c["trades"].append({"time": _now(), "side": "sell", "price": price,
+                            "volume": vol, "amount": gross, "fee": fee,
+                            "pnl": net, "reason": reason})
+        c["position"] = None
+
+    # ---------- 대시보드용 스냅샷 ----------
+    def snapshot(self) -> Dict[str, Any]:
+        coins = []
+        total_equity = total_realized = total_budget = 0.0
+        for tk in self.tickers:
+            c = self.coins[tk]
+            price = c.get("price")
+            p = c["position"]
+            coin_val = (price or 0.0) * (p["size"] if p else 0.0)
+            equity = c["cash"] + coin_val
+            avg = (p["cost"] / p["size"]) if p else 0.0
+            unrl = ((price - avg) * p["size"]) if (p and price) else 0.0
+            total_equity += equity
+            total_realized += c["realized_pnl"]
+            total_budget += self.per_coin
+            coins.append({
+                "ticker": tk, "price": price, "cash": c["cash"],
+                "confirmed": c["confirmed"], "reg_raw": c.get("reg_raw"),
+                "has_position": p is not None,
+                "avg_price": avg, "volume": p["size"] if p else 0.0,
+                "tranches_used": p["used"] if p else 0,
+                "exit_mode": p["exit_mode"] if p else None,
+                "coin_value": coin_val, "equity": equity,
+                "unrealized": unrl, "realized": c["realized_pnl"],
+                "recent_trades": list(reversed(c["trades"][-5:])),
+            })
+        v = self._ai_view
+        return {
+            "running": self._running.is_set(),
+            "mode": self.cfg.get("mode", "paper"),
+            "last_update": self._last_update,
+            "last_error": self._last_error,
+            "entries_allowed": self._entries_allowed(),
+            "total": {"budget": total_budget, "equity": total_equity,
+                      "realized": total_realized,
+                      "pnl": total_equity - total_budget,
+                      "ret_pct": (total_equity - total_budget) / total_budget * 100 if total_budget else 0.0},
+            "ai_regime": {
+                "enabled": bool(self.advisor and self.advisor.enabled),
+                "regime": v.regime if v else None,
+                "risk_off": v.risk_off if v else None,
+                "confidence": v.confidence if v else None,
+                "reason": v.reason if v else None,
+                "decided_at": self._ai_at,
+                "disabled_reason": self.advisor.disabled_reason if self.advisor else None,
+            },
+            "coins": coins,
+        }

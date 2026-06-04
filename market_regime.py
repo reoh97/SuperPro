@@ -17,8 +17,9 @@ import sys
 
 import yaml
 
-from trader import backtest, indicators, regime
+from trader import backtest
 from trader.ai_advisor import AIAdvisor
+from trader.market import build_market_summary
 from trader.news import NewsFeed
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -42,31 +43,6 @@ def load_dotenv(path: str) -> None:
             k, v = k.strip(), v.strip().strip('"').strip("'")
             if k and k not in os.environ:
                 os.environ[k] = v
-
-
-def build_market_summary(df, cfg: dict) -> str:
-    """차트 지표를 사람이 읽을 요약 문장으로 (AI 입력용)."""
-    d = indicators.enrich(df, cfg)
-    row = d.iloc[-1]
-    reg = regime.classify(row, cfg)
-    reg_kr = {"UP": "상승추세", "DOWN": "하락추세", "SIDEWAYS": "방향성약함/횡보"}[reg]
-
-    close = float(row["close"])
-    # 최근 변화율(24봉=약 6시간, 96봉=약 1일 @15m)
-    look_d = min(96, len(d) - 1)
-    look_h = min(24, len(d) - 1)
-    chg_d = (close / float(d.iloc[-1 - look_d]["close"]) - 1) * 100
-    chg_h = (close / float(d.iloc[-1 - look_h]["close"]) - 1) * 100
-
-    ef, em, es = float(row["ema_fast"]), float(row["ema_mid"]), float(row["ema_slow"])
-    align = "정배열(상승구조)" if ef > em > es else "역배열(하락구조)" if ef < em < es else "혼조"
-    return (
-        f"- 차트 기술적 국면: {reg_kr} (ADX {float(row['adx']):.0f})\n"
-        f"- 현재가: {close:,.0f}원\n"
-        f"- 최근 약1일 변화: {chg_d:+.2f}%, 최근 약6시간: {chg_h:+.2f}%\n"
-        f"- EMA 배열: {align} (단기 {ef:,.0f} / 중기 {em:,.0f} / 장기 {es:,.0f})\n"
-        f"- RSI: {float(row['rsi']):.0f}, 가격 vs 장기EMA: {'위' if close > es else '아래'}"
-    )
 
 
 def main():

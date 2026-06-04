@@ -41,6 +41,12 @@ scalp:
   max_hold_bars: 480
   confirm_bars: 3
   exit_on_down: true         # DOWN 확정전환 시 보유분 즉시청산(=V1 '청산 후 대기'). false=홀드(약세장 최악)
+  bull_mode:                 # AI=BULL 확신 시에만 켜지는 상승장 공격모드(중간 공격). 그 외 장세=보수 유지.
+    enabled: true            #   근거(BTC/USD 프록시): 불장 적용 시 -2%→+수십%. 약세/횡보엔 절대 적용 안 됨(AI게이트 분기)
+    require_adx_rising: false #   불장 한정 진입필터 완화 → 추세 참여↑(보수모드 7건→공격모드 수십건)
+    trail_pct: 0.04          #   불장 한정 트레일 넓게(0.025→0.04) → 승자 길게
+    hold_through_down: true  #   불장 한정: 눌림목 DOWN플립에 안 팔고 홀드(보수모드는 청산). 불타기는 OFF 유지
+    min_confidence: 60       #   AI 확신도 이 값 이상일 때만 공격(샤키한 불장 판단엔 보수)
   uptrend:                   # 상승장 진입 (검증결과 trail이 fixed 30조합 전부 이김)
     enabled: true
     mode: trail              # trail=추세 길게 타기(승자) | fixed=작게 자주먹기

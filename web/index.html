@@ -99,8 +99,8 @@ async function refresh() {
     document.getElementById("updated").textContent = s.last_update || "-";
 
     const gate = document.getElementById("gate");
-    gate.textContent = s.entries_allowed ? "신규매수 허용" : "신규매수 중단(현금보존)";
-    gate.className = "badge " + (s.entries_allowed ? "on" : "off");
+    gate.textContent = "진입: " + (s.gate || (s.entries_allowed ? "정상" : "중단"));
+    gate.className = "badge " + (s.entries_allowed ? (s.gate && s.gate.includes("방어") ? "side" : "on") : "off");
 
     const t = s.total || {};
     document.getElementById("equity").textContent = won(t.equity);

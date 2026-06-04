@@ -14,8 +14,11 @@ ai:
   model: claude-haiku-4-5
   min_confidence: 60
   min_interval_sec: 900
+  regime_interval_sec: 900   # AI 장세 재판단 주기(초). 장세는 천천히 바뀌니 길게=비용절감
   news_max_items: 12
   news_cache_sec: 900
+  bear_defensive: true       # BEAR 장세에서 과매도 반등 단타를 소액 허용(false면 완전 현금)
+  bear_size_mult: 0.5        # BEAR 방어매수 크기 배수(0.5=절반)
 news_feeds:
 - https://www.coindesk.com/arc/outboundfeeds/rss/
 - https://cointelegraph.com/rss
@@ -41,6 +44,9 @@ scalp:
     mode: trail              # trail=추세 길게 타기(승자) | fixed=작게 자주먹기
     require_adx_rising: true  # 추세 강해지는 중(ADX↑)일 때만 진입=가짜추세 컷.
                               #   상승장 +1.85→+2.45%, 약세장 -3.30→-2.11% 둘다 개선
+    pyramid: false           # 불타기(오르는 포지션에 추가매수). 구현완료·검증결과 15m 구간선
+                             #   OFF와 동률~손해(촘촘하면 트레일에 더 깎임)→기본 OFF. 강추세 검증 후 ON 고려
+    pyramid_step: 0.04       # ON일 때: 직전 진입가 +4% 추가상승마다 1트랜치(촘촘하면 역효과)
     sl_pct: 0.02             # 초기 손절 -2%
     trail_pct: 0.025         # 고점 대비 -2.5% 되돌림에 청산(승자를 길게)
     tp_pct: 0.011            # fixed 모드용 익절(미사용)

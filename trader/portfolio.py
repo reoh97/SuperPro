@@ -74,6 +74,9 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict) -> CoinResult:
 
     scfg = cfg.get("scalp", {})
     confirm_bars = int(scfg.get("confirm_bars", 3))
+    ucfg = scfg.get("uptrend", {})
+    pyramid = bool(ucfg.get("pyramid", False))           # 상승장 불타기
+    pyramid_step = float(ucfg.get("pyramid_step", 0.02))  # 직전 진입가 +step 상승마다 추가
     warmup = int(cfg.get("indicators", {}).get("ema_slow", 200)) + 5
 
     d = indicators.enrich(df, cfg)
@@ -101,6 +104,21 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict) -> CoinResult:
             exit_reason=exit_reason, invested=p["cost"],
             net_pnl=net, ret_pct=net / p["cost"] if p["cost"] else 0.0,
         ))
+
+    def add_tranche(p, price):
+        """포지션에 1트랜치 추가(분할매수/불타기 공용). 평단·수량·사용횟수 갱신."""
+        nonlocal cash
+        spend = min(tranche_krw, cash)
+        if spend <= 0 or price <= 0:
+            return
+        entry_fee = spend * fee
+        p["size"] += (spend - entry_fee) / price
+        p["cost"] += spend - entry_fee
+        p["fees"] += entry_fee
+        p["used"] += 1
+        p["last_entry"] = price
+        cash -= spend
+        res.fees_paid += entry_fee
 
     for i in range(warmup, len(rows)):
         row = rows.iloc[i]
@@ -164,17 +182,13 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict) -> CoinResult:
             # 추가매수(분할, fixed 모드만): 직전 진입가 대비 add_drop 이상 하락 + 신호 재발생
             if pos["exit_mode"] == "fixed" and pos["used"] < n_tranche \
                     and sig.should_enter and row["close"] <= pos["last_entry"] * (1 - add_drop):
-                spend = min(tranche_krw, cash)
-                if spend > 0:
-                    entry_fee = spend * fee
-                    size = (spend - entry_fee) / float(row["close"])
-                    cash -= spend
-                    res.fees_paid += entry_fee
-                    pos["size"] += size
-                    pos["cost"] += spend - entry_fee
-                    pos["fees"] += entry_fee
-                    pos["used"] += 1
-                    pos["last_entry"] = float(row["close"])
+                add_tranche(pos, float(row["close"]))
+
+            # 불타기(trail 모드): 상승 지속 시 오르는 포지션에 추가(직전가 +pyramid_step↑ & UP)
+            elif pos["exit_mode"] == "trail" and pyramid and pos["used"] < n_tranche \
+                    and confirmed == regime.UP \
+                    and row["close"] >= pos["last_entry"] * (1 + pyramid_step):
+                add_tranche(pos, float(row["close"]))
             continue
 
         # 미보유 → 국면별 신호로 1번 트랜치 진입

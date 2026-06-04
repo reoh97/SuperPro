@@ -51,7 +51,11 @@ class LiveTrader:
         self.max_hold = int(pcfg.get("max_hold_bars", 480))
         self.fee = float(cfg["trade"]["fee"])
         self.unit = int(cfg.get("timeframe_min", 15))
-        self.confirm_bars = int(cfg.get("scalp", {}).get("confirm_bars", 3))
+        scfg = cfg.get("scalp", {})
+        self.confirm_bars = int(scfg.get("confirm_bars", 3))
+        ucfg = scfg.get("uptrend", {})
+        self.pyramid = bool(ucfg.get("pyramid", False))            # 상승장 불타기
+        self.pyramid_step = float(ucfg.get("pyramid_step", 0.04))
         self.market_ticker = cfg.get("ticker", "KRW-BTC")  # AI 장세판단 대표코인
 
         # 종목별 상태: {ticker: {...}}
@@ -159,14 +163,27 @@ class LiveTrader:
             self._ai_at = _now()
         self._last_ai_ts = now
 
-    def _entries_allowed(self) -> bool:
-        """AI 장세 게이트: BEAR/risk_off면 신규매수 중단(현금 보존). 그 외/비활성은 허용."""
+    def _entry_policy(self):
+        """AI 장세 게이트(차등). 반환: (allowed, only_down, size_mult).
+        - risk_off            → 완전 현금(진입 0)
+        - BEAR + bear_defensive → 과매도 반등 단타(DOWN)만, 크기 축소
+        - BEAR + 방어off       → 진입 0
+        - 그 외/AI없음/오류     → 정상 진입(fail-open)
+        """
         v = self._ai_view
         if v is None or v.regime == "ERROR":
-            return True   # AI 없거나 오류 → 차트 신호만으로 진행(fail-open)
-        if v.risk_off or v.regime == "BEAR":
-            return False
-        return True
+            return True, False, 1.0
+        if v.risk_off:
+            return False, False, 1.0
+        if v.regime == "BEAR":
+            ai = self.cfg.get("ai", {})
+            if not bool(ai.get("bear_defensive", True)):
+                return False, False, 1.0
+            return True, True, float(ai.get("bear_size_mult", 0.5))
+        return True, False, 1.0
+
+    def _entries_allowed(self) -> bool:
+        return self._entry_policy()[0]
 
     # ---------- 종목 평가 ----------
     def _eval_coin(self, tk: str):
@@ -234,24 +251,32 @@ class LiveTrader:
                 if pos["bars_held"] >= self.max_hold:
                     self._sell(tk, price, "timeout"); return
 
-            # 추가매수(fixed, 새 봉에서만): 직전가 -add_drop 이상 하락 + 신호 + AI 허용
-            if (new_bar and mode == "fixed" and pos["used"] < self.n_tranche
-                    and sig.should_enter and price <= pos["last_entry"] * (1 - self.add_drop)
-                    and self._entries_allowed()):
-                self._buy(tk, price, sig, add=True)
+            # 추가(새 봉에서만). 정상 장세(BULL/SIDEWAYS)에서만 — BEAR/risk_off선 추가 안 함.
+            allowed, only_down, mult = self._entry_policy()
+            if new_bar and allowed and not only_down and pos["used"] < self.n_tranche:
+                # 분할매수(fixed): 직전가 -add_drop 하락 + 신호
+                if (mode == "fixed" and sig.should_enter
+                        and price <= pos["last_entry"] * (1 - self.add_drop)):
+                    self._buy(tk, price, sig, add=True)
+                # 불타기(trail): 직전가 +pyramid_step 상승 + UP 지속
+                elif (mode == "trail" and self.pyramid and confirmed == regime.UP
+                        and price >= pos["last_entry"] * (1 + self.pyramid_step)):
+                    self._buy(tk, price, sig, add=True)
             return
 
-        # ----- 미보유: 새 봉에서 신호 + AI 게이트 통과 시 진입 -----
-        if new_bar and sig.should_enter and self._entries_allowed():
-            self._buy(tk, price, sig, add=False)
+        # ----- 미보유: 새 봉 + 신호 + AI 정책 통과 시 진입 -----
+        if new_bar and sig.should_enter:
+            allowed, only_down, mult = self._entry_policy()
+            if allowed and not (only_down and confirmed != regime.DOWN):
+                self._buy(tk, price, sig, add=False, size_mult=mult)
 
     # ---------- 체결(모의) ----------
     def _tranche_krw(self) -> float:
         return self.per_coin / self.n_tranche
 
-    def _buy(self, tk: str, price: float, sig, add: bool):
+    def _buy(self, tk: str, price: float, sig, add: bool, size_mult: float = 1.0):
         c = self.coins[tk]
-        spend = min(self._tranche_krw(), c["cash"])
+        spend = min(self._tranche_krw() * size_mult, c["cash"])
         if spend <= 0 or price <= 0:
             return
         fee = spend * self.fee
@@ -319,12 +344,17 @@ class LiveTrader:
                 "recent_trades": list(reversed(c["trades"][-5:])),
             })
         v = self._ai_view
+        allowed, only_down, mult = self._entry_policy()
+        gate = ("현금보존(신규 중단)" if not allowed
+                else f"방어 소액만(×{mult:g})" if only_down
+                else "정상 진입")
         return {
             "running": self._running.is_set(),
             "mode": self.cfg.get("mode", "paper"),
             "last_update": self._last_update,
             "last_error": self._last_error,
-            "entries_allowed": self._entries_allowed(),
+            "entries_allowed": allowed,
+            "gate": gate,
             "total": {"budget": total_budget, "equity": total_equity,
                       "realized": total_realized,
                       "pnl": total_equity - total_budget,

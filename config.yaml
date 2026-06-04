@@ -40,6 +40,7 @@ scalp:
   min_profit_buffer: 0.002
   max_hold_bars: 480
   confirm_bars: 3
+  exit_on_down: true         # DOWN 확정전환 시 보유분 즉시청산(=V1 '청산 후 대기'). false=홀드(약세장 최악)
   uptrend:                   # 상승장 진입 (검증결과 trail이 fixed 30조합 전부 이김)
     enabled: true
     mode: trail              # trail=추세 길게 타기(승자) | fixed=작게 자주먹기
@@ -64,8 +65,10 @@ scalp:
     sl_pct: 0.004
     rsi_buy: 32
     require_above_slow: true
-  downtrend:                 # 하락장: 깊은 과매도 반등만 골라 +3% (검증: 약세장 DOWN +로 전환)
-    enabled: true
+  downtrend:                 # 하락장(DOWN): 관망/대기 (신규진입 없음, SIDEWAYS 복귀까지 현금)
+    enabled: false           # V1 채택: DOWN 과매도반등(칼받기) 끔 → BTC프록시 약세장 일손실 -0.094→-0.052%,
+                             #   횡보장도 개선·상승장 영향미미. 박스(SIDEWAYS) 수익엔진은 유지. exit_on_down=true와 함께.
+                             #   (true로 켜면: 깊은과매도 RSI22 반등단타 +3% — KRW검증선 '작지만+'였음)
     tp_pct: 0.03             # +3% 목표 (작게잡으면 수수료+가끔손절에 깨짐)
     sl_pct: 0.008            # 손절 -0.8%
     rsi_buy: 22              # 깊은 과매도에서만(27→22). 얕으면 반등실패로 대량손실

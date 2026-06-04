@@ -17,8 +17,9 @@ ai:
   regime_interval_sec: 900   # AI 장세 재판단 주기(초). 장세는 천천히 바뀌니 길게=비용절감
   news_max_items: 12
   news_cache_sec: 900
-  bear_defensive: true       # BEAR 장세에서 과매도 반등 단타를 소액 허용(false면 완전 현금)
-  bear_size_mult: 0.5        # BEAR 방어매수 크기 배수(0.5=절반)
+  bear_defensive: true       # BEAR 장세: UP(추세추종) 차단, 박스+반등만 허용(false면 완전현금)
+                             #   검증: 약세장 UP차단 시 일평균 -0.003%→+0.015%(박스가 유일 수익원)
+  bear_size_mult: 1.0        # BEAR 진입 크기 배수(박스는 저위험 단타라 1.0 권장, 더 보수적이면 ↓)
 news_feeds:
 - https://www.coindesk.com/arc/outboundfeeds/rss/
 - https://cointelegraph.com/rss
@@ -55,7 +56,7 @@ scalp:
     box_lookback: 40
     min_box_pct: 0.015
     max_box_pct: 0.06
-    entry_zone: 0.25
+    entry_zone: 0.25         # 박스 하단 진입(0.35는 약세장↑ 상승장↓ 트레이드오프→상승보존 위해 0.25)
     tp_zone: 0.9             # 박스 상단 목표(단, quick_tp_pct로 더 작게 캡)
     quick_tp_pct: 0.005      # 빠른 익절: 수수료 넘으면 +0.5%서 바로 턴다(작게 자주, 손실일 차단)
     sl_below: 0.004
@@ -63,11 +64,11 @@ scalp:
     sl_pct: 0.004
     rsi_buy: 32
     require_above_slow: true
-  downtrend:                 # 하락장: 거래 적게, 과매도 반등에서 2~3% 목표
+  downtrend:                 # 하락장: 깊은 과매도 반등만 골라 +3% (검증: 약세장 DOWN +로 전환)
     enabled: true
-    tp_pct: 0.025            # +2.5% 목표
-    sl_pct: 0.015
-    rsi_buy: 27
+    tp_pct: 0.03             # +3% 목표 (작게잡으면 수수료+가끔손절에 깨짐)
+    sl_pct: 0.008            # 손절 -0.8%
+    rsi_buy: 22              # 깊은 과매도에서만(27→22). 얕으면 반등실패로 대량손실
 portfolio:
   total_krw: 20000000        # 총자본 2,000만원
   per_coin_krw: 2000000      # 종목당 200만원

@@ -164,23 +164,25 @@ class LiveTrader:
         self._last_ai_ts = now
 
     def _entry_policy(self):
-        """AI 장세 게이트(차등). 반환: (allowed, only_down, size_mult).
+        """AI 장세 게이트(차등). 반환: (allowed, allowed_regimes, size_mult).
         - risk_off            → 완전 현금(진입 0)
-        - BEAR + bear_defensive → 과매도 반등 단타(DOWN)만, 크기 축소
+        - BEAR + bear_defensive → **UP(추세추종) 차단**, 박스(SIDEWAYS)+과매도반등(DOWN)만.
+            검증: 약세장 UP 차단 시 일평균 -0.003%→+0.015%(박스가 유일한 수익원, UP가 손실원)
         - BEAR + 방어off       → 진입 0
-        - 그 외/AI없음/오류     → 정상 진입(fail-open)
+        - 그 외/AI없음/오류     → 전체 허용(fail-open)
         """
+        ALL = {regime.UP, regime.SIDEWAYS, regime.DOWN}
         v = self._ai_view
         if v is None or v.regime == "ERROR":
-            return True, False, 1.0
+            return True, ALL, 1.0
         if v.risk_off:
-            return False, False, 1.0
+            return False, set(), 1.0
         if v.regime == "BEAR":
             ai = self.cfg.get("ai", {})
             if not bool(ai.get("bear_defensive", True)):
-                return False, False, 1.0
-            return True, True, float(ai.get("bear_size_mult", 0.5))
-        return True, False, 1.0
+                return False, set(), 1.0
+            return True, {regime.SIDEWAYS, regime.DOWN}, float(ai.get("bear_size_mult", 1.0))
+        return True, ALL, 1.0
 
     def _entries_allowed(self) -> bool:
         return self._entry_policy()[0]
@@ -251,23 +253,23 @@ class LiveTrader:
                 if pos["bars_held"] >= self.max_hold:
                     self._sell(tk, price, "timeout"); return
 
-            # 추가(새 봉에서만). 정상 장세(BULL/SIDEWAYS)에서만 — BEAR/risk_off선 추가 안 함.
-            allowed, only_down, mult = self._entry_policy()
-            if new_bar and allowed and not only_down and pos["used"] < self.n_tranche:
+            # 추가(새 봉에서만). 현재 국면이 AI 정책상 허용될 때만(BEAR선 UP 차단).
+            allowed, regs, mult = self._entry_policy()
+            if new_bar and allowed and confirmed in regs and pos["used"] < self.n_tranche:
                 # 분할매수(fixed): 직전가 -add_drop 하락 + 신호
                 if (mode == "fixed" and sig.should_enter
                         and price <= pos["last_entry"] * (1 - self.add_drop)):
-                    self._buy(tk, price, sig, add=True)
+                    self._buy(tk, price, sig, add=True, size_mult=mult)
                 # 불타기(trail): 직전가 +pyramid_step 상승 + UP 지속
                 elif (mode == "trail" and self.pyramid and confirmed == regime.UP
                         and price >= pos["last_entry"] * (1 + self.pyramid_step)):
-                    self._buy(tk, price, sig, add=True)
+                    self._buy(tk, price, sig, add=True, size_mult=mult)
             return
 
-        # ----- 미보유: 새 봉 + 신호 + AI 정책 통과 시 진입 -----
+        # ----- 미보유: 새 봉 + 신호 + AI 정책상 현재 국면 허용 시 진입 -----
         if new_bar and sig.should_enter:
-            allowed, only_down, mult = self._entry_policy()
-            if allowed and not (only_down and confirmed != regime.DOWN):
+            allowed, regs, mult = self._entry_policy()
+            if allowed and confirmed in regs:
                 self._buy(tk, price, sig, add=False, size_mult=mult)
 
     # ---------- 체결(모의) ----------
@@ -344,9 +346,9 @@ class LiveTrader:
                 "recent_trades": list(reversed(c["trades"][-5:])),
             })
         v = self._ai_view
-        allowed, only_down, mult = self._entry_policy()
+        allowed, regs, mult = self._entry_policy()
         gate = ("현금보존(신규 중단)" if not allowed
-                else f"방어 소액만(×{mult:g})" if only_down
+                else f"약세장 방어(박스+반등, UP차단 ×{mult:g})" if regime.UP not in regs
                 else "정상 진입")
         return {
             "running": self._running.is_set(),

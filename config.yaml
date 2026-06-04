@@ -41,12 +41,17 @@ scalp:
   max_hold_bars: 480
   confirm_bars: 3
   exit_on_down: true         # DOWN 확정전환 시 보유분 즉시청산(=V1 '청산 후 대기'). false=홀드(약세장 최악)
-  bull_mode:                 # AI=BULL 확신 시에만 켜지는 상승장 공격모드(중간 공격). 그 외 장세=보수 유지.
-    enabled: true            #   근거(BTC/USD 프록시): 불장 적용 시 -2%→+수십%. 약세/횡보엔 절대 적용 안 됨(AI게이트 분기)
-    require_adx_rising: false #   불장 한정 진입필터 완화 → 추세 참여↑(보수모드 7건→공격모드 수십건)
-    trail_pct: 0.04          #   불장 한정 트레일 넓게(0.025→0.04) → 승자 길게
-    hold_through_down: true  #   불장 한정: 눌림목 DOWN플립에 안 팔고 홀드(보수모드는 청산). 불타기는 OFF 유지
-    min_confidence: 60       #   AI 확신도 이 값 이상일 때만 공격(샤키한 불장 판단엔 보수)
+  bull_mode:                 # AI=BULL 확신도에 따라 상승장 강도 3단(강함/적당/그외). 약세/횡보엔 적용 안 됨.
+    enabled: true            #   근거(BTC/USD 프록시): 불장 적용 시 보수대비 큰 폭 개선. AI게이트로만 분기.
+    min_confidence: 60       # 이 미만이면 보수(박스/방어). 60~strong 사이=적당(중도), strong 이상=강함(공격)
+    strong_confidence: 75    # 이 이상 확신이면 풀 공격
+    require_adx_rising: false # [강함] 진입필터 완화 → 추세 적극 참여
+    trail_pct: 0.04          # [강함] 트레일 넓게(승자 길게)
+    hold_through_down: true  # [강함] 눌림목 DOWN플립에 홀드(안 팖)
+    moderate:                # [적당] 60~75 확신: 선별 진입 + 추세 + 안전망
+      require_adx_rising: true   #   ADX 켜서 가짜추세 컷(선별 진입) — 적당불장은 신중하게
+      trail_pct: 0.03            #   trail 살짝 넓게(보수 2.5%→3%)로 추세 조금 더 탐
+      hold_through_down: false   #   DOWN 청산 유지(적당불장이 가짜로 판명나면 빠짐=안전망)
   uptrend:                   # 상승장 진입 (검증결과 trail이 fixed 30조합 전부 이김)
     enabled: true
     mode: trail              # trail=추세 길게 타기(승자) | fixed=작게 자주먹기

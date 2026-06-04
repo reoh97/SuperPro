@@ -64,7 +64,7 @@ def replay(cfg, bars, ai_view, label, budget):
         state["df"] = bars.iloc[i - 199:i + 1]       # 라이브와 동일: 직전 200봉
         state["price"] = float(bars["close"].iloc[i])
         lt._ai_view = ai_view                          # 실시간 AI 대체(주입)
-        if lt._bull_mode():
+        if lt._bull_tier() is not None:
             on += 1
         lt._eval_coin(tk)
     c = lt.coins[tk]

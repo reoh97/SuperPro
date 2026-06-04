@@ -60,17 +60,24 @@ class LiveTrader:
         self.pyramid_step = float(ucfg.get("pyramid_step", 0.04))
         self.market_ticker = cfg.get("ticker", "KRW-BTC")  # AI 장세판단 대표코인
 
-        # 상승장 공격모드: AI가 BULL 확신 시에만 UP 전략을 공격적으로(중간 공격).
-        #   adx필터 완화 + trail 넓게 + 눌림목 DOWN플립에 홀드(청산 안 함). 그 외 장세는 보수 유지.
-        #   근거(BTC/USD 프록시): 불장에 적용 시 -2%→+수십%, 단 약세/횡보엔 절대 켜면 안 됨→AI게이트로 분기.
+        # 상승장 공격모드(3단): AI 확신도에 따라 강함/적당/그외. BULL일 때만, 그 외 장세는 보수.
+        #   강함(≥strong): adx완화+trail넓게+DOWN홀드.  적당(min~strong): 선별진입(adx)+trail중간+DOWN청산.
+        #   근거(BTC/USD 프록시): 불장 적용 시 보수대비 큰 개선. 약세/횡보엔 절대 적용 안 됨→AI게이트로 분기.
         bm = scfg.get("bull_mode", {})
         self.bull_enabled = bool(bm.get("enabled", True))
         self.bull_min_conf = float(bm.get("min_confidence", 60))
-        self.bull_hold_down = bool(bm.get("hold_through_down", True))
+        self.bull_strong_conf = float(bm.get("strong_confidence", 75))
+        self.bull_hold_down = bool(bm.get("hold_through_down", True))           # 강함 티어
         self._cfg_bull = copy.deepcopy(cfg)
         ub = self._cfg_bull.setdefault("scalp", {}).setdefault("uptrend", {})
         ub["require_adx_rising"] = bool(bm.get("require_adx_rising", False))
         ub["trail_pct"] = float(bm.get("trail_pct", 0.04))
+        mod = bm.get("moderate", {})                                            # 적당 티어
+        self.bull_mod_hold_down = bool(mod.get("hold_through_down", False))
+        self._cfg_bull_mod = copy.deepcopy(cfg)
+        um = self._cfg_bull_mod.setdefault("scalp", {}).setdefault("uptrend", {})
+        um["require_adx_rising"] = bool(mod.get("require_adx_rising", True))
+        um["trail_pct"] = float(mod.get("trail_pct", 0.03))
 
         # 종목별 상태: {ticker: {...}}
         self.coins: Dict[str, dict] = {}
@@ -201,17 +208,19 @@ class LiveTrader:
     def _entries_allowed(self) -> bool:
         return self._entry_policy()[0]
 
-    def _bull_mode(self) -> bool:
-        """AI가 BULL을 충분히 확신할 때만 상승장 공격모드 ON. 그 외(약세/횡보/위험/AI없음)=보수."""
+    def _bull_tier(self) -> Optional[str]:
+        """AI=BULL 확신도에 따라 'strong'(강함)/'moderate'(적당)/None(보수). 그 외 장세=None."""
         if not self.bull_enabled:
-            return False
+            return None
         v = self._ai_view
         if v is None or v.regime != "BULL" or v.risk_off:
-            return False
+            return None
         conf = getattr(v, "confidence", None)
-        if conf is not None and conf < self.bull_min_conf:
-            return False
-        return True
+        if conf is None:
+            return "strong"                       # 확신도 없으면 BULL=강함으로 간주
+        if conf < self.bull_min_conf:
+            return None                           # 확신 약하면 보수
+        return "strong" if conf >= self.bull_strong_conf else "moderate"
 
     # ---------- 종목 평가 ----------
     def _eval_coin(self, tk: str):
@@ -246,8 +255,13 @@ class LiveTrader:
 
         confirmed = c["confirmed"]
         pos = c["position"]
-        bull = self._bull_mode()                          # AI=BULL 확신 시 공격모드
-        cfg_eval = self._cfg_bull if bull else self.cfg   # UP 진입을 공격/보수로 분기
+        tier = self._bull_tier()                          # 'strong' | 'moderate' | None
+        if tier == "strong":
+            cfg_eval, hold_down = self._cfg_bull, self.bull_hold_down
+        elif tier == "moderate":
+            cfg_eval, hold_down = self._cfg_bull_mod, self.bull_mod_hold_down
+        else:
+            cfg_eval, hold_down = self.cfg, False
         sig = strategies.evaluate(prev, row, confirmed, cfg_eval, self.fee)
 
         # ----- 보유 중: 청산 감시(매 루프, 현재가 기준) -----
@@ -256,8 +270,8 @@ class LiveTrader:
                 pos["bars_held"] += 1
             avg = pos["cost"] / pos["size"]
 
-            # DOWN 확정전환 → 즉시 탈출 (단 공격모드 홀드 시엔 눌림목으로 보고 안 팖)
-            exit_down = self.exit_on_down and not (bull and self.bull_hold_down)
+            # DOWN 확정전환 → 즉시 탈출 (단 홀드 티어에선 눌림목으로 보고 안 팖)
+            exit_down = self.exit_on_down and not hold_down
             if exit_down and confirmed == regime.DOWN and pos["regime"] != regime.DOWN:
                 self._sell(tk, price, "regime"); return
 
@@ -376,9 +390,10 @@ class LiveTrader:
             })
         v = self._ai_view
         allowed, regs, mult = self._entry_policy()
-        bull = self._bull_mode()
+        tier = self._bull_tier()
         gate = ("현금보존(신규 중단)" if not allowed
-                else "🔥 상승장 공격모드(추세추종 강화)" if bull
+                else "🔥 상승장 공격모드(강함: 추세추종 강화)" if tier == "strong"
+                else "⚡ 상승장 중도모드(적당: 선별진입+추세)" if tier == "moderate"
                 else f"약세장 방어(박스+반등, UP차단 ×{mult:g})" if regime.UP not in regs
                 else "정상 진입")
         return {
@@ -400,7 +415,7 @@ class LiveTrader:
                 "reason": v.reason if v else None,
                 "decided_at": self._ai_at,
                 "disabled_reason": self.advisor.disabled_reason if self.advisor else None,
-                "aggressive": bull,
+                "bull_tier": tier,                 # 'strong' | 'moderate' | None
             },
             "coins": coins,
         }

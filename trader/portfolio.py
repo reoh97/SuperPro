@@ -75,6 +75,8 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict,
     add_atr_mult = float(pcfg.get("add_drop_atr_mult", 1.5))
     add_min = float(pcfg.get("add_drop_min", 0.008))
     add_max = float(pcfg.get("add_drop_max", 0.05))
+    add_req_sig = bool(pcfg.get("add_require_signal", True))  # 추가 트리거: True=박스신호 재발생 필요(현행),
+                                                              #   False=박스국면 유지중이면 '하락'만으로 추가(물타기 활성)
     hard_sl = float(pcfg.get("hard_sl_pct", 0.06))
     max_hold = int(pcfg.get("max_hold_bars", 480))
     tranche_krw = budget / n_tranche
@@ -200,8 +202,10 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict,
                 drop = min(max(add_atr_mult * float(row["atr"]) / float(row["close"]), add_min), add_max)
             else:
                 drop = add_drop
+            # 추가 조건: 박스신호 재발생(현행) 또는 박스국면 유지중(완화=물타기 활성)
+            can_add = sig.should_enter if add_req_sig else (confirmed == regime.SIDEWAYS)
             if pos["exit_mode"] == "fixed" and pos["used"] < n_tranche \
-                    and sig.should_enter and row["close"] <= pos["last_entry"] * (1 - drop):
+                    and can_add and row["close"] <= pos["last_entry"] * (1 - drop):
                 add_tranche(pos, float(row["close"]))
 
             # 불타기(trail 모드): 상승 지속 시 오르는 포지션에 추가(직전가 +pyramid_step↑ & UP)

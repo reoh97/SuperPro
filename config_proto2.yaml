@@ -1,0 +1,113 @@
+# ============================================================
+#  프로토타입 2 (공격형)  —  P1(config.yaml, 안정형)의 변형
+#  차이: 자본 더 투입(2분할) · 적당상승 적극 · 박스 더 자주/크게 · 하락 바닥잡기 ON
+#  안전장치(exit_on_down, 박스 require_bounce)는 유지. [P2] 표시가 P1과 다른 곳.
+#  실행:  python run.py config_proto2.yaml   /  백테스트는 proto_backtest 로 비교
+# ============================================================
+mode: paper
+ticker: KRW-BTC
+strategy:
+  k: 0.5
+  ma_period: 5
+trade:
+  invest_ratio: 0.5
+  fee: 0.0005
+  min_order_krw: 5000
+loop:
+  interval_sec: 10
+ai:
+  enabled: true
+  model: claude-haiku-4-5
+  min_confidence: 60
+  min_interval_sec: 900
+  regime_interval_sec: 900
+  news_max_items: 12
+  news_cache_sec: 900
+  bear_defensive: true
+  bear_size_mult: 1.0
+news_feeds:
+- https://www.coindesk.com/arc/outboundfeeds/rss/
+- https://cointelegraph.com/rss
+- https://decrypt.co/feed
+timeframe_min: 15
+indicators:
+  ema_fast: 20
+  ema_mid: 50
+  ema_slow: 200
+  rsi: 14
+  atr: 14
+  adx: 14
+  bb: 20
+  bb_mult: 2.0
+regime:
+  adx_trend: 20
+scalp:
+  min_profit_buffer: 0.002
+  max_hold_bars: 480
+  confirm_bars: 3
+  exit_on_down: true         # 유지(공격형이라도 DOWN전환 청산 안전장치는 둠)
+  bull_mode:
+    enabled: true
+    min_confidence: 55       # [P2] 60→55: 공격모드 더 자주 진입
+    strong_confidence: 70    # [P2] 75→70: 풀공격(불타기) 더 일찍 발동
+    require_adx_rising: false
+    trail_pct: 0.04
+    hold_through_down: true
+    pyramid: true
+    pyramid_step: 0.03
+    moderate:
+      require_adx_rising: false  # [P2] true→false: 적당상승도 적극 진입(선별X)
+      trail_pct: 0.035           # [P2] 0.03→0.035: 추세 더 길게
+      hold_through_down: false   # DOWN 청산은 유지(적당불장 안전망)
+  uptrend:
+    enabled: true
+    mode: trail
+    require_adx_rising: true
+    pyramid: false
+    pyramid_step: 0.04
+    sl_pct: 0.02
+    trail_pct: 0.025
+    tp_pct: 0.011
+  sideways:
+    mode: range
+    require_bounce: true     # 유지(구조개선, 떨어지는 칼 회피)
+    box_lookback: 40
+    min_box_pct: 0.015
+    max_box_pct: 0.06
+    entry_zone: 0.35         # [P2] 0.25→0.35: 박스 진입 더 자주
+    tp_zone: 0.9
+    quick_tp_pct: 0.008      # [P2] 0.005→0.008: 박스 한 번에 조금 더 먹기
+    sl_below: 0.004
+    tp_pct: 0.005
+    sl_pct: 0.004
+    rsi_buy: 32
+    require_above_slow: true
+  downtrend:
+    enabled: true            # [P2] false→true: 하락장 선별 반등 단타 ON
+    tp_pct: 0.03
+    sl_pct: 0.008
+    rsi_buy: 22              # 깊은 과매도에서만(칼받기 방지)
+portfolio:
+  total_krw: 20000000
+  per_coin_krw: 2000000
+  tickers:
+  - KRW-BTC
+  - KRW-ETH
+  - KRW-XRP
+  - KRW-SOL
+  - KRW-ADA
+  - KRW-DOGE
+  - KRW-TRX
+  - KRW-LINK
+  - KRW-AVAX
+  - KRW-DOT
+  tranches: 2                # [P2] 4→2: 첫 진입 50%(예산 더 적극 투입). 수익↑·낙폭↑ 트레이드오프
+  add_drop_pct: 0.02
+  tp_pct: 0.02
+  hard_sl_pct: 0.06
+  max_hold_bars: 480
+paper:
+  initial_krw: 1000000
+upbit:
+  access_key: ''
+  secret_key: ''

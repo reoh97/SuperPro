@@ -58,8 +58,14 @@ def build_engine(cfg: dict) -> LiveTrader:
 
 
 def main():
+    import sys
     load_dotenv(os.path.join(BASE, ".env"))   # ANTHROPIC_API_KEY 등 로드
-    cfg = load_config(os.path.join(BASE, "config.yaml"))
+    # 설정 파일 선택: 인자로 주면 그걸, 없으면 config.yaml(=프로토타입1)
+    #   예) python run.py config_proto2.yaml   → 프로토타입2(공격형)
+    cfg_name = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
+    cfg_path = cfg_name if os.path.isabs(cfg_name) else os.path.join(BASE, cfg_name)
+    cfg = load_config(cfg_path)
+    print(f"[설정] {os.path.basename(cfg_path)}")
     mode = cfg.get("mode", "paper")
     engine = build_engine(cfg)
     engine.start_loop()   # 시세/국면 평가 루프 기동 (매매는 대시보드에서 활성화)

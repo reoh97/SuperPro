@@ -69,6 +69,8 @@ scalp:
     tp_pct: 0.011            # fixed 모드용 익절(미사용)
   sideways:                  # 횡보장: 박스권 반복 신호 발라먹기(여러 번 왕복)
     mode: range
+    require_bounce: true     # 하단에서 '직전봉 고가 돌파'(반등확인) 때만 진입 = 떨어지는 칼 회피.
+                             #   검증(BTC): 횡보 -0.40%→+0.32%, 약세 -0.77%→-0.27%, MDD 2.7배↓. 구조개선(과적합 아님)
     box_lookback: 40
     min_box_pct: 0.015
     max_box_pct: 0.06

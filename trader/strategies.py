@@ -33,7 +33,7 @@ def _min_tp(cfg: dict, fee: float) -> float:
     return fee * 2 + buffer  # 왕복 수수료 + 버퍼
 
 
-def _range_entry(row, s: dict, cfg: dict, fee: float) -> Entry:
+def _range_entry(prev, row, s: dict, cfg: dict, fee: float) -> Entry:
     """박스권 발라먹기: 하단 근처 매수 → 상단 근처 익절, 박스 이탈 시 손절."""
     import math
     top, bot, close = row["box_top"], row["box_bot"], row["close"]
@@ -50,6 +50,11 @@ def _range_entry(row, s: dict, cfg: dict, fee: float) -> Entry:
     # 하단 근처(박스높이의 entry_zone 이내)에서만 매수
     entry_zone = float(s.get("entry_zone", 0.25))
     if close > bot + entry_zone * height:
+        return _NO
+
+    # 반등 확인(옵션): 하단에서 '직전 봉 고가 돌파'로 반등이 확인될 때만 진입.
+    #   = 떨어지는 칼(박스 하향이탈) 회피. (바닥잡기 검증서 naive 진입 손실→본전으로 끌어올린 핵심)
+    if bool(s.get("require_bounce", False)) and not (close > prev["high"]):
         return _NO
 
     # 익절: 상단 근처(tp_zone 지점), 손절: 박스 하단 아래 sl_below
@@ -108,7 +113,7 @@ def evaluate(prev, row, reg: str, cfg: dict, fee: float) -> Entry:
         mode = s.get("mode", "range")
 
         if mode == "range":
-            return _range_entry(row, s, cfg, fee)
+            return _range_entry(prev, row, s, cfg, fee)
 
         # (대안) 단순 평균회귀: 볼린저 하단 + RSI 과매도
         tp = max(float(s.get("tp_pct", 0.005)), _min_tp(cfg, fee))

@@ -68,6 +68,8 @@ class LiveTrader:
         self.bull_min_conf = float(bm.get("min_confidence", 60))
         self.bull_strong_conf = float(bm.get("strong_confidence", 75))
         self.bull_hold_down = bool(bm.get("hold_through_down", True))           # 강함 티어
+        self.bull_pyramid = bool(bm.get("pyramid", True))                       # 강함 티어: 보루를 승자에 추가(불타기)
+        self.bull_pyramid_step = float(bm.get("pyramid_step", 0.04))            #   직전 진입가 +step 추가상승마다 1트랜치
         self._cfg_bull = copy.deepcopy(cfg)
         ub = self._cfg_bull.setdefault("scalp", {}).setdefault("uptrend", {})
         ub["require_adx_rising"] = bool(bm.get("require_adx_rising", False))
@@ -303,10 +305,13 @@ class LiveTrader:
                 if (mode == "fixed" and sig.should_enter
                         and price <= pos["last_entry"] * (1 - self.add_drop)):
                     self._buy(tk, price, sig, add=True, size_mult=mult)
-                # 불타기(trail): 직전가 +pyramid_step 상승 + UP 지속
-                elif (mode == "trail" and self.pyramid and confirmed == regime.UP
-                        and price >= pos["last_entry"] * (1 + self.pyramid_step)):
-                    self._buy(tk, price, sig, add=True, size_mult=mult)
+                # 불타기(trail): 강한 상승(strong) 티어에서만 보루를 승자에 추가. 직전가 +step 상승 + UP 지속.
+                else:
+                    pyr_on = self.bull_pyramid if tier == "strong" else self.pyramid
+                    pyr_step = self.bull_pyramid_step if tier == "strong" else self.pyramid_step
+                    if (mode == "trail" and pyr_on and confirmed == regime.UP
+                            and price >= pos["last_entry"] * (1 + pyr_step)):
+                        self._buy(tk, price, sig, add=True, size_mult=mult)
             return
 
         # ----- 미보유: 새 봉 + 신호 + AI 정책상 현재 국면 허용 시 진입 -----

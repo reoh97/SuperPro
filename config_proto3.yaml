@@ -1,0 +1,56 @@
+# ============================================================
+#  프로토타입 3 (초단타)  —  거래량 폭발 코인 모멘텀 스캘핑
+#  P1/P2(국면별 분할 포트폴리오)와 전혀 다른 종류:
+#   · 넓은 후보군에서 '거래량 폭발' 상위 3개만 동적 선정
+#   · 분할매수 없음, 코인당 600만원 단일 진입
+#   · 돌파 모멘텀에 진입 → +1% 짧게 먹고 탈출(초단타)
+#  ⚠️ 알트 펌핑 전용. BTC 백테스트는 엣지 없음(틀린 시험대). KRW 알트 검증 전 라이브 금지.
+# ============================================================
+mode: paper
+strategy_kind: scalp_p3      # 엔진이 P3 스캘핑 모드로 동작(라이브 엔진은 알트검증 후 연결)
+trade:
+  fee: 0.0005
+  min_order_krw: 5000
+loop:
+  interval_sec: 10           # 초단타라 자주 폴링
+timeframe_min: 5             # 5분봉(초단타). 더 빠르게 1~3분도 가능
+indicators:
+  ema_fast: 20
+  ema_mid: 50
+  rsi: 14
+  atr: 14
+scalp_p3:
+  top_n: 3                   # 거래량 폭발 상위 3개만
+  per_coin_krw: 6000000      # 코인당 600만 단일 진입(분할 없음)
+  vol_mult: 3.0              # 직전봉 거래량 ≥ 평균×3 이면 '폭발'
+  vol_lookback: 20           # 거래량 평균 기간
+  breakout_lookback: 10      # 직전 10봉 고가 돌파(모멘텀 확인)
+  tp_pct: 0.01               # +1% 익절(목표)
+  sl_pct: 0.007              # -0.7% 손절(짧게 끊기)
+  timeout_bars: 12           # 12봉(=60분 @5m) 내 미달성 시 탈출
+  rescan_sec: 60             # 거래량 랭킹 재계산 주기
+  max_positions: 3           # 동시 최대 3종목
+universe:                    # 거래량 폭발을 스캔할 후보군(원화 주요 유동코인). 넓을수록 펌핑 포착↑
+- KRW-BTC
+- KRW-ETH
+- KRW-XRP
+- KRW-SOL
+- KRW-ADA
+- KRW-DOGE
+- KRW-TRX
+- KRW-LINK
+- KRW-AVAX
+- KRW-DOT
+- KRW-MATIC
+- KRW-SHIB
+- KRW-SUI
+- KRW-APT
+- KRW-NEAR
+- KRW-ARB
+- KRW-SAND
+- KRW-SEI
+- KRW-PEPE
+- KRW-BONK
+upbit:
+  access_key: ''
+  secret_key: ''

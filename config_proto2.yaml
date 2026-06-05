@@ -51,7 +51,7 @@ scalp:
     min_confidence: 55       # [P2] 60→55: 공격모드 더 자주 진입
     strong_confidence: 70    # [P2] 75→70: 풀공격(불타기) 더 일찍 발동
     require_adx_rising: false
-    trail_pct: 0.04
+    trail_pct: 0.05            # [강함] KRW 불장 실검증: 4%→5% (넓을수록 알트펌프 끝까지, +2.49→+3.75%/코인)
     hold_through_down: true
     pyramid: true
     pyramid_step: 0.03

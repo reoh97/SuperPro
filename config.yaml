@@ -46,7 +46,8 @@ scalp:
     min_confidence: 60       # 이 미만이면 보수(박스/방어). 60~strong 사이=적당(중도), strong 이상=강함(공격)
     strong_confidence: 75    # 이 이상 확신이면 풀 공격
     require_adx_rising: false # [강함] 진입필터 완화 → 추세 적극 참여
-    trail_pct: 0.04          # [강함] 트레일 넓게(승자 길게)
+    trail_pct: 0.05          # [강함] 트레일 넓게(승자 길게) — KRW 불장 실검증: 4%+2.49→6%+3.36%/코인(넓을수록↑)
+                             #   6%는 단일구간 과적합 우려→robust 균형 5%. 손절 2%가 적정(더 좁히면 좋은추세 조기컷)
     hold_through_down: true  # [강함] 눌림목 DOWN플립에 홀드(안 팖)
     pyramid: true            # [강함] 불타기 ON: 남은 보루(75%)를 '오르는 승자'에 추가 투입
                              #   검증(BTC 불장): 단일50만 +4.6%/MDD-2.3 → 불타기 +9.7%/MDD-4.2 (위험대비 최고)

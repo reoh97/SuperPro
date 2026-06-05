@@ -71,6 +71,10 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict,
     budget = float(pcfg.get("per_coin_krw", 2000000))
     n_tranche = int(pcfg.get("tranches", 5))
     add_drop = float(pcfg.get("add_drop_pct", 0.02))
+    add_mode = str(pcfg.get("add_drop_mode", "fixed"))      # fixed | atr (변동성 적응형)
+    add_atr_mult = float(pcfg.get("add_drop_atr_mult", 1.5))
+    add_min = float(pcfg.get("add_drop_min", 0.008))
+    add_max = float(pcfg.get("add_drop_max", 0.05))
     hard_sl = float(pcfg.get("hard_sl_pct", 0.06))
     max_hold = int(pcfg.get("max_hold_bars", 480))
     tranche_krw = budget / n_tranche
@@ -190,9 +194,14 @@ def _run_coin(ticker: str, df: pd.DataFrame, cfg: dict,
                 pos = None
                 continue
 
-            # 추가매수(분할, fixed 모드만): 직전 진입가 대비 add_drop 이상 하락 + 신호 재발생
+            # 추가매수(분할, fixed 모드만): 직전 진입가 대비 'drop' 이상 하락 + 신호 재발생.
+            #   drop = 고정(add_drop) 또는 ATR 적응형(변동성×배수, min/max 클램프).
+            if add_mode == "atr" and row["close"] > 0:
+                drop = min(max(add_atr_mult * float(row["atr"]) / float(row["close"]), add_min), add_max)
+            else:
+                drop = add_drop
             if pos["exit_mode"] == "fixed" and pos["used"] < n_tranche \
-                    and sig.should_enter and row["close"] <= pos["last_entry"] * (1 - add_drop):
+                    and sig.should_enter and row["close"] <= pos["last_entry"] * (1 - drop):
                 add_tranche(pos, float(row["close"]))
 
             # 불타기(trail 모드): 상승 지속 시 오르는 포지션에 추가(직전가 +pyramid_step↑ & UP)

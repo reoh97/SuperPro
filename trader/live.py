@@ -276,15 +276,17 @@ class LiveTrader:
             cfg_eval, hold_down = self.cfg, False
         sig = strategies.evaluate(prev, row, confirmed, cfg_eval, self.fee)
 
-        # ===== 그리드 모드: 횡보(SIDEWAYS)는 그리드로 운용(박스 단일진입 대체) =====
+        # ===== 그리드 모드: 'AI가 불장이 아닐 때(tier None=횡보/약세)'의 SIDEWAYS만 그리드 =====
+        #   불장(strong/moderate)엔 추세를 타야 하므로 그리드 OFF(레인지매매 금지). 박스/트레일이 처리.
         if self.sideways_grid:
-            allowed_g, regs_g, mult_g = self._entry_policy()
-            if confirmed == regime.SIDEWAYS and allowed_g and regime.SIDEWAYS in regs_g:
-                if pos is not None:                       # 직전 UP 잔여 포지션은 청산
-                    self._sell(tk, price, "regime")
-                self._run_grid(tk, c, price, new_bar, mult_g)
-                return
-            self._liquidate_grid(tk, c, price)            # 횡보 아니면 그리드 청산 후 아래 기존 로직
+            if tier is None and confirmed == regime.SIDEWAYS:
+                allowed_g, regs_g, mult_g = self._entry_policy()
+                if allowed_g and regime.SIDEWAYS in regs_g:
+                    if pos is not None:                   # 직전 UP 잔여 포지션은 청산
+                        self._sell(tk, price, "regime")
+                    self._run_grid(tk, c, price, new_bar, mult_g)
+                    return
+            self._liquidate_grid(tk, c, price)            # 비활성(불장/비SIDEWAYS/차단) → 그리드 청산
 
         # ----- 보유 중: 청산 감시(매 루프, 현재가 기준) -----
         if pos is not None:

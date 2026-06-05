@@ -68,10 +68,13 @@ scalp:
     sl_pct: 0.02             # 초기 손절 -2%
     trail_pct: 0.025         # 고점 대비 -2.5% 되돌림에 청산(승자를 길게)
     tp_pct: 0.011            # fixed 모드용 익절(미사용)
-  sideways:                  # 횡보장: 박스권 반복 신호 발라먹기(여러 번 왕복)
-    mode: range
-    require_bounce: true     # 하단에서 '직전봉 고가 돌파'(반등확인) 때만 진입 = 떨어지는 칼 회피.
-                             #   검증(BTC): 횡보 -0.40%→+0.32%, 약세 -0.77%→-0.27%, MDD 2.7배↓. 구조개선(과적합 아님)
+  sideways:                  # 횡보장: 그리드(칸칸이 발라먹기) — 라이브 기본. 박스(range)는 백테스트/대안.
+    mode: range              # 백테스트 엔진용(range=박스). 라이브는 아래 grid_enabled가 우선.
+    grid_enabled: true       # 라이브: SIDEWAYS를 그리드로 운용. 실 KRW 검증: 비국면 손실 -1.59%→-0.37%(4배↓)
+    grid_step: 0.012         #   칸 간격 1.2%(매수 -1.2%마다, 매도 +1.2% 반등마다)
+    grid_levels: 8           #   최대 8칸(종목당 200만÷8=25만/칸)
+    grid_stop: 0.05          #   최저매수가 -5% 이탈 시 전량청산(범위붕괴=가방 회피)
+    require_bounce: true     # (박스 range모드용) 하단 '직전봉 고가 돌파' 반등확인 진입.
     box_lookback: 40
     min_box_pct: 0.015
     max_box_pct: 0.06

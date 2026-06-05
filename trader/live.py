@@ -81,6 +81,15 @@ class LiveTrader:
         um["require_adx_rising"] = bool(mod.get("require_adx_rising", True))
         um["trail_pct"] = float(mod.get("trail_pct", 0.03))
 
+        # 횡보 그리드: SIDEWAYS 국면을 '칸칸이 발라먹기'(그리드)로 운용(박스 단일진입 대체).
+        #   실 KRW 검증(grid_backtest): 비국면 손실 -1.59%→-0.37%(4배↓, 약세 방어). 국면게이트+바닥손절로 가방 회피.
+        #   (백테스트 엔진은 박스 유지 → 그리드 검증은 grid_backtest.py 별도)
+        swc = scfg.get("sideways", {})
+        self.sideways_grid = bool(swc.get("grid_enabled", False))
+        self.grid_step = float(swc.get("grid_step", 0.012))
+        self.grid_levels = int(swc.get("grid_levels", 8))
+        self.grid_stop = float(swc.get("grid_stop", 0.05))
+
         # 종목별 상태: {ticker: {...}}
         self.coins: Dict[str, dict] = {}
 
@@ -101,7 +110,7 @@ class LiveTrader:
     # ---------- 상태 영속화 ----------
     def _fresh_coin(self) -> dict:
         return {"cash": self.per_coin, "realized_pnl": 0.0, "position": None,
-                "trades": [], "last_bar": None, "confirmed": regime.SIDEWAYS,
+                "grid": [], "trades": [], "last_bar": None, "confirmed": regime.SIDEWAYS,
                 "streak_reg": None, "streak": 0, "price": None, "reg_raw": None}
 
     def _load(self):
@@ -120,7 +129,8 @@ class LiveTrader:
         dump = {}
         for tk, c in self.coins.items():
             dump[tk] = {"cash": c["cash"], "realized_pnl": c["realized_pnl"],
-                        "position": c["position"], "trades": c["trades"][-100:],
+                        "position": c["position"], "grid": c.get("grid", []),
+                        "trades": c["trades"][-100:],
                         "last_bar": c["last_bar"], "confirmed": c["confirmed"],
                         "streak_reg": c["streak_reg"], "streak": c["streak"]}
         tmp = self.state_path + ".tmp"
@@ -266,6 +276,16 @@ class LiveTrader:
             cfg_eval, hold_down = self.cfg, False
         sig = strategies.evaluate(prev, row, confirmed, cfg_eval, self.fee)
 
+        # ===== 그리드 모드: 횡보(SIDEWAYS)는 그리드로 운용(박스 단일진입 대체) =====
+        if self.sideways_grid:
+            allowed_g, regs_g, mult_g = self._entry_policy()
+            if confirmed == regime.SIDEWAYS and allowed_g and regime.SIDEWAYS in regs_g:
+                if pos is not None:                       # 직전 UP 잔여 포지션은 청산
+                    self._sell(tk, price, "regime")
+                self._run_grid(tk, c, price, new_bar, mult_g)
+                return
+            self._liquidate_grid(tk, c, price)            # 횡보 아니면 그리드 청산 후 아래 기존 로직
+
         # ----- 보유 중: 청산 감시(매 루프, 현재가 기준) -----
         if pos is not None:
             if new_bar:
@@ -367,6 +387,59 @@ class LiveTrader:
                             "pnl": net, "reason": reason})
         c["position"] = None
 
+    # ---------- 그리드(횡보) 체결 ----------
+    def _grid_unit_krw(self) -> float:
+        return self.per_coin / max(self.grid_levels, 1)
+
+    def _grid_buy(self, tk: str, c: dict, price: float, size_mult: float = 1.0):
+        spend = min(self._grid_unit_krw() * size_mult, c["cash"])
+        if spend <= 0 or price <= 0:
+            return
+        fee = spend * self.fee
+        size = (spend - fee) / price
+        c["cash"] -= spend
+        c.setdefault("grid", []).append({"price": float(price), "size": size, "cost": spend - fee})
+        c["trades"].append({"time": _now(), "side": "buy", "price": price, "volume": size,
+                            "amount": spend, "fee": fee, "reason": "grid"})
+
+    def _grid_sell_unit(self, tk: str, c: dict, unit: dict, price: float):
+        size = unit["size"]
+        gross = price * size
+        fee = gross * self.fee
+        c["cash"] += gross - fee
+        net = (gross - fee) - unit["cost"]
+        c["realized_pnl"] += net
+        c["trades"].append({"time": _now(), "side": "sell", "price": price, "volume": size,
+                            "amount": gross, "fee": fee, "pnl": net, "reason": "grid"})
+
+    def _liquidate_grid(self, tk: str, c: dict, price: float):
+        grid = c.get("grid")
+        if not grid:
+            return
+        for unit in grid:
+            self._grid_sell_unit(tk, c, unit, price)
+        c["grid"] = []
+
+    def _run_grid(self, tk: str, c: dict, price: float, new_bar: bool, size_mult: float = 1.0):
+        grid = c.setdefault("grid", [])
+        # 바닥이탈 손절(가방 컷): 최저 매수가 -grid_stop 아래로 깨지면 전량청산
+        if grid and price <= min(u["price"] for u in grid) * (1 - self.grid_stop):
+            self._liquidate_grid(tk, c, price); return
+        # 매도: 각 칸을 매수가 +grid_step 반등에 청산
+        remain = []
+        for u in grid:
+            if price >= u["price"] * (1 + self.grid_step):
+                self._grid_sell_unit(tk, c, u, price)
+            else:
+                remain.append(u)
+        c["grid"] = remain
+        # 매수: 새 봉에서 한 칸씩. 직전 최저매수가 -step 하락(비었으면 현재가 시드).
+        if new_bar and len(remain) < self.grid_levels:
+            ref = min(u["price"] for u in remain) if remain else price
+            trig = ref * (1 - self.grid_step) if remain else price
+            if price <= trig:
+                self._grid_buy(tk, c, price, size_mult)
+
     # ---------- 대시보드용 스냅샷 ----------
     def snapshot(self) -> Dict[str, Any]:
         coins = []
@@ -375,10 +448,14 @@ class LiveTrader:
             c = self.coins[tk]
             price = c.get("price")
             p = c["position"]
-            coin_val = (price or 0.0) * (p["size"] if p else 0.0)
+            grid = c.get("grid", [])
+            grid_size = sum(u["size"] for u in grid)
+            coin_val = (price or 0.0) * ((p["size"] if p else 0.0) + grid_size)
             equity = c["cash"] + coin_val
             avg = (p["cost"] / p["size"]) if p else 0.0
             unrl = ((price - avg) * p["size"]) if (p and price) else 0.0
+            if grid and price:                       # 그리드 평가손익도 미실현에 포함
+                unrl += sum((price - u["price"]) * u["size"] for u in grid)
             total_equity += equity
             total_realized += c["realized_pnl"]
             total_budget += self.per_coin

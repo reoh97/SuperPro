@@ -55,16 +55,27 @@ def _get(market: str, count: int, to: str | None):
     if to:
         params["to"] = to
     url = API.format(unit=UNIT) + "?" + urllib.parse.urlencode(params)
+    # 1) 파이썬 네트워크(urllib) 시도 — PC 등 대부분 환경
     req = urllib.request.Request(url, headers={"Accept": "application/json",
                                                "User-Agent": "Mozilla/5.0"})
-    for attempt in range(5):
+    for attempt in range(3):
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 return json.loads(r.read())
-        except Exception as e:
-            if attempt == 4:
-                raise
-            time.sleep(0.5 * (attempt + 1))
+        except Exception:
+            time.sleep(0.4 * (attempt + 1))
+    # 2) 폴백: curl (a-Shell 등 파이썬 네트워크가 막힌 환경. curl은 됨)
+    tmp = os.path.join(BASE, "_upbit_tmp.json")
+    for attempt in range(3):
+        rc = os.system(f'curl -s -H "Accept: application/json" "{url}" -o "{tmp}"')
+        try:
+            with open(tmp, "r", encoding="utf-8") as f:
+                data = json.loads(f.read())
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+        time.sleep(0.5 * (attempt + 1))
     return []
 
 
@@ -115,6 +126,9 @@ def main():
                     w.writerow([dt.replace("T", " "), o, h, l, c, v])
             saved += 1
             print(f"  {tk}: {len(data)}봉 저장")
+    tmp = os.path.join(BASE, "_upbit_tmp.json")
+    if os.path.exists(tmp):
+        os.remove(tmp)
     print(f"\n완료: {saved}개 파일 → backtest_data/")
     print("다음:  git add backtest_data && git commit -m \"분봉 수집\" && git push")
 

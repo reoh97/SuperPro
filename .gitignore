@@ -25,3 +25,6 @@ Thumbs.db
 desktop.ini
 .idea/
 .vscode/
+
+# 폰 수집기 임시파일
+_upbit_tmp.json

@@ -100,18 +100,26 @@ def _confluence_entry(prev, row, reg: str, cfg: dict, fee: float) -> Entry:
         sl = float(ex.get("sl_pct", 0.02))
         trail = float(ex.get("trail_pct", 0.04))
         return Entry(True, "trail", 0.0, sl, trail, reason)
+    # "scalp": sl_price+tp+timeout 단순 청산. 백테스트/라이브가 동일하게 동작(라이브의 "fixed"는
+    #   분할매수 평단가 로직이라 단순 TP/SL과 안 맞음 → 합의 진입은 scalp로 내보낸다).
     tp = max(float(ex.get("tp_pct", 0.006)), _min_tp(cfg, fee))
     sl = float(ex.get("sl_pct", 0.01))
-    return Entry(True, "fixed", tp, sl, 0.0, reason)
+    return Entry(True, "scalp", tp, sl, 0.0, reason)
 
 
 def evaluate(prev, row, reg: str, cfg: dict, fee: float) -> Entry:
     """직전 봉(prev)·현재 봉(row)·국면(reg)으로 진입 판단."""
     scfg = cfg.get("scalp", {})
 
-    # 합의(confluence) 엔진이 켜져 있으면 그것으로 진입 판단(국면 게이트는 내부 유지).
-    if bool(cfg.get("confluence", {}).get("enabled", False)):
-        return _confluence_entry(prev, row, reg, cfg, fee)
+    # 합의(confluence) 엔진: 켜져 있고, 이 국면이 confluence.regimes에 속하면 합의로 판단.
+    #   regimes 미지정 → 전 국면을 합의가 담당. 지정 시 그 국면만(나머지는 아래 현행 전략).
+    #   검증 결론(engine_compare): 횡보=합의 압승(+3.4%p), 상승=현행 우세(MDD 4배↓) → 하이브리드.
+    ccfg = cfg.get("confluence", {})
+    if bool(ccfg.get("enabled", False)):
+        regimes = ccfg.get("regimes")
+        if regimes is None or reg in regimes:
+            return _confluence_entry(prev, row, reg, cfg, fee)
+        # 이 국면은 합의 대상 아님 → 아래 현행 국면별 전략으로 처리
 
     if reg == regime.UP:
         s = scfg.get("uptrend", {})

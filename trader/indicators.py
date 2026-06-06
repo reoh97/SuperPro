@@ -70,6 +70,31 @@ def bollinger(close: pd.Series, period: int = 20, mult: float = 2.0):
     return mid, upper, lower, width_pct
 
 
+def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    """MACD. 반환: (line, signal, histogram)."""
+    line = ema(close, fast) - ema(close, slow)
+    sig = ema(line, signal)
+    hist = line - sig
+    return line, sig, hist
+
+
+def stochastic(high: pd.Series, low: pd.Series, close: pd.Series,
+               k_period: int = 14, d_period: int = 3):
+    """스토캐스틱 오실레이터. 반환: (%K, %D). 둘 다 0~100."""
+    ll = low.rolling(k_period).min()
+    hh = high.rolling(k_period).max()
+    pct_k = 100 * (close - ll) / (hh - ll).replace(0.0, np.nan)
+    pct_k = pct_k.fillna(50.0)
+    pct_d = pct_k.rolling(d_period).mean().fillna(50.0)
+    return pct_k, pct_d
+
+
+def obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """On-Balance Volume — 종가 방향으로 거래량을 누적(매집/분산 추적)."""
+    direction = np.sign(close.diff().fillna(0.0))
+    return (direction * volume).cumsum()
+
+
 def enrich(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """전략에 필요한 모든 지표를 컬럼으로 추가해 반환."""
     out = df.copy()
@@ -83,6 +108,20 @@ def enrich(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     out["adx"], out["plus_di"], out["minus_di"] = adx_, pdi, mdi
     mid, up, lo, width = bollinger(out["close"], ind.get("bb", 20), ind.get("bb_mult", 2.0))
     out["bb_mid"], out["bb_up"], out["bb_low"], out["bb_width"] = mid, up, lo, width
+
+    # --- 합의(confluence) 엔진용 추가 지표 ---
+    cind = cfg.get("confluence", {}).get("indicators", {})
+    line, sig, hist = macd(out["close"], cind.get("macd_fast", 12),
+                           cind.get("macd_slow", 26), cind.get("macd_signal", 9))
+    out["macd"], out["macd_signal"], out["macd_hist"] = line, sig, hist
+    pk, pd_ = stochastic(out["high"], out["low"], out["close"],
+                         cind.get("stoch_k", 14), cind.get("stoch_d", 3))
+    out["stoch_k"], out["stoch_d"] = pk, pd_
+    # 거래량 계열(volume 컬럼이 있을 때만 — 없으면 합의 엔진이 거래량 그룹을 건너뜀)
+    if "volume" in out.columns:
+        out["vol_ma"] = out["volume"].rolling(cind.get("vol_ma", 20)).mean()
+        out["obv"] = obv(out["close"], out["volume"])
+        out["obv_ema"] = ema(out["obv"], cind.get("obv_ema", 20))
 
     # 박스권(레인지) 상/하단: 최근 lookback 봉의 고점/저점.
     # shift(1)로 '직전까지' 형성된 박스를 사용 (현재봉으로 박스를 정의하는 미래참조 방지)

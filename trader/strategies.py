@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import regime
+from . import confluence, regime
 
 
 @dataclass
@@ -78,9 +78,40 @@ def _range_entry(prev, row, s: dict, cfg: dict, fee: float) -> Entry:
                  f"박스권 하단매수(폭 {height_pct*100:.1f}%)")
 
 
+def _confluence_entry(prev, row, reg: str, cfg: dict, fee: float) -> Entry:
+    """다지표 합의 점수로 진입 판단. 국면 게이트는 유지(아래 규칙 그대로):
+      - DOWN: downtrend.enabled일 때만 진입 허용(그 외 관망 = 현금)
+      - 점수 < threshold면 진입 안 함
+      - 청산 파라미터는 국면별(confluence.exits)로 분기(UP=trail로 길게, 그 외=fixed)
+    """
+    ccfg = cfg.get("confluence", {})
+    scfg = cfg.get("scalp", {})
+
+    if reg == regime.DOWN and not bool(scfg.get("downtrend", {}).get("enabled", False)):
+        return _NO  # 하락장 관망(기존 국면 게이트 유지)
+
+    sc = confluence.score(prev, row, reg, cfg)
+    if not sc.passed:
+        return _NO
+
+    ex = ccfg.get("exits", {}).get(reg, {})
+    reason = f"합의진입 {sc.score:.0f}점 [{reg}]"
+    if ex.get("mode", "fixed") == "trail":
+        sl = float(ex.get("sl_pct", 0.02))
+        trail = float(ex.get("trail_pct", 0.04))
+        return Entry(True, "trail", 0.0, sl, trail, reason)
+    tp = max(float(ex.get("tp_pct", 0.006)), _min_tp(cfg, fee))
+    sl = float(ex.get("sl_pct", 0.01))
+    return Entry(True, "fixed", tp, sl, 0.0, reason)
+
+
 def evaluate(prev, row, reg: str, cfg: dict, fee: float) -> Entry:
     """직전 봉(prev)·현재 봉(row)·국면(reg)으로 진입 판단."""
     scfg = cfg.get("scalp", {})
+
+    # 합의(confluence) 엔진이 켜져 있으면 그것으로 진입 판단(국면 게이트는 내부 유지).
+    if bool(cfg.get("confluence", {}).get("enabled", False)):
+        return _confluence_entry(prev, row, reg, cfg, fee)
 
     if reg == regime.UP:
         s = scfg.get("uptrend", {})

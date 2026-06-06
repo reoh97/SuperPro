@@ -36,6 +36,31 @@ indicators:
   bb_mult: 2.0
 regime:
   adx_trend: 20
+confluence:                  # 다지표 합의 진입 엔진 (사람이 동시에 못 보는 모든 지표를 한 표씩)
+  enabled: false             # 기본 OFF: confluence_sweep.py로 문턱 검증 후 켤 것(현행 검증전략 보존)
+  threshold: 75              # 진입 점수 문턱(0~100, 50=중립). 높을수록 합의 강할 때만 진입
+                             #   스윕 결과(실KRW): 75→횡보+3.1%/상승-0.6%, 80→상승+2.5%/횡보+2.9%
+                             #   (낮추면 거래 급증+떡락. 약세는 구조적 마이너스=라이브 AI게이트가 UP차단으로 방어)
+  meanrev_rsi_low: 35        # 평균회귀 그룹: 과매도 기준
+  meanrev_rsi_high: 70       #               과매수 기준
+  atr_pct_min: 0.002         # 변동성 그룹: ATR/가격 적정 하한(이하=움직임 고갈)
+  atr_pct_max: 0.030         #              적정 상한(초과=과변동, 중립)
+  indicators:
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    stoch_k: 14
+    stoch_d: 3
+    vol_ma: 20
+    obv_ema: 20
+  weights:                   # 국면별 그룹 가중치 — 상승장=추세↑, 횡보장=평균회귀↑
+    UP:       {trend: 2.0, momentum: 1.5, meanrev: 0.0, volatility: 0.5, volume: 1.0}
+    SIDEWAYS: {trend: 0.5, momentum: 1.0, meanrev: 2.0, volatility: 0.5, volume: 1.0}
+    DOWN:     {trend: 1.0, momentum: 1.0, meanrev: 1.5, volatility: 0.5, volume: 1.0}
+  exits:                     # 진입 후 청산: 국면별(상승=트레일로 길게, 그 외=고정 익절/손절)
+    UP:       {mode: trail, sl_pct: 0.02, trail_pct: 0.04}
+    SIDEWAYS: {mode: fixed, tp_pct: 0.006, sl_pct: 0.010}
+    DOWN:     {mode: fixed, tp_pct: 0.006, sl_pct: 0.008}
 scalp:
   min_profit_buffer: 0.002
   max_hold_bars: 480

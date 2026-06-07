@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import List
 
-import feedparser
+# feedparser는 뉴스를 실제로 가져올 때만 필요 → 지연 import(미설치 환경에서도 라이브 엔진은 동작).
 
 
 @dataclass
@@ -46,6 +46,10 @@ class NewsFeed:
             return list(self._cache)
 
     def _fetch(self) -> List[Headline]:
+        try:
+            import feedparser
+        except ImportError:
+            return []  # feedparser 미설치 → 뉴스 없이 진행(AI는 시세요약만으로 판단)
         out: List[Headline] = []
         for url in self.feeds:
             try:

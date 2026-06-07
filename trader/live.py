@@ -90,6 +90,18 @@ class LiveTrader:
         self.grid_levels = int(swc.get("grid_levels", 8))
         self.grid_stop = float(swc.get("grid_stop", 0.05))
 
+        # 합의(confluence) 엔진 — AI게이트 하이브리드.
+        #   검증(engine_compare, 실KRW): 횡보 합의 +2.89%(현행 -0.31%, PF5.6) / 상승은 현행 추세가
+        #   위험대비 우위(합의 MDD 4배). → 'AI가 불장 아님(tier None)'일 때만 합의, 불장은 현행 유지.
+        #   합의 담당 코인은 그리드 OFF(아래 _eval_coin). 청산은 합의가 scalp/trail로 직접 책임.
+        ccfg = cfg.get("confluence", {})
+        self.conf_enabled = bool(ccfg.get("live", False))      # 라이브 하이브리드 스위치(백테스트 enabled와 분리)
+        self.conf_ai_gated = bool(ccfg.get("ai_gated", True))  # True=불장 아닐때만, False=항상
+        self._cfg_conf = copy.deepcopy(cfg)
+        cc = self._cfg_conf.setdefault("confluence", {})
+        cc["enabled"] = True
+        cc["regimes"] = None                                    # 라이브 합의는 전 봉국면 담당
+
         # 종목별 상태: {ticker: {...}}
         self.coins: Dict[str, dict] = {}
 
@@ -274,19 +286,25 @@ class LiveTrader:
             cfg_eval, hold_down = self._cfg_bull_mod, self.bull_mod_hold_down
         else:
             cfg_eval, hold_down = self.cfg, False
+
+        # 합의(confluence) 엔진 활성: enabled + (ai_gated면 AI 불장 아닐 때만=tier None).
+        #   불장(strong/moderate)은 현행 추세엔진 유지(위험대비 우위). 합의 담당 시 그리드 OFF.
+        use_conf = self.conf_enabled and (tier is None or not self.conf_ai_gated)
+        if use_conf:
+            cfg_eval, hold_down = self._cfg_conf, False
         sig = strategies.evaluate(prev, row, confirmed, cfg_eval, self.fee)
 
-        # ===== 그리드 모드: 'AI가 불장이 아닐 때(tier None=횡보/약세)'의 SIDEWAYS만 그리드 =====
-        #   불장(strong/moderate)엔 추세를 타야 하므로 그리드 OFF(레인지매매 금지). 박스/트레일이 처리.
+        # ===== 그리드 모드: 'AI 불장 아님(tier None)'의 SIDEWAYS만 그리드 (합의 미사용 시) =====
+        #   불장엔 추세를 타야 하므로 그리드 OFF. 합의가 켜진 코인도 그리드 OFF(합의가 횡보를 직접 담당).
         if self.sideways_grid:
-            if tier is None and confirmed == regime.SIDEWAYS:
+            if not use_conf and tier is None and confirmed == regime.SIDEWAYS:
                 allowed_g, regs_g, mult_g = self._entry_policy()
                 if allowed_g and regime.SIDEWAYS in regs_g:
                     if pos is not None:                   # 직전 UP 잔여 포지션은 청산
                         self._sell(tk, price, "regime")
                     self._run_grid(tk, c, price, new_bar, mult_g)
                     return
-            self._liquidate_grid(tk, c, price)            # 비활성(불장/비SIDEWAYS/차단) → 그리드 청산
+            self._liquidate_grid(tk, c, price)            # 비활성(불장/합의/비SIDEWAYS/차단) → 그리드 청산
 
         # ----- 보유 중: 청산 감시(매 루프, 현재가 기준) -----
         if pos is not None:

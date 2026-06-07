@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import pyupbit
 
-from . import backtest, indicators, regime, strategies
+from . import backtest, indicators, regime, selector, strategies
 from .ai_advisor import AIAdvisor, RegimeView
 from .market import build_market_summary
 from .news import NewsFeed
@@ -44,7 +44,20 @@ class LiveTrader:
         self.state_path = state_path
 
         pcfg = cfg.get("portfolio", {})
-        self.tickers: List[str] = list(pcfg.get("tickers", [cfg.get("ticker", "KRW-BTC")]))
+        # 동적 셀렉터: 유니버스 전체를 들고 상태관리하되, '신규 진입'은 상위 top_k(active)만 허용.
+        #   신호=변동성조정 모멘텀(selector.py). 비활성 종목은 보유분 청산만(가둠 방지).
+        scl = cfg.get("selector", {})
+        self.sel_enabled = bool(scl.get("enabled", False))
+        self.sel_top_k = int(scl.get("top_k", 3))
+        self.sel_period = int(scl.get("period", 96))
+        self.sel_rebalance_sec = float(scl.get("rebalance_hours", 24)) * 3600.0
+        base = list(pcfg.get("tickers", [cfg.get("ticker", "KRW-BTC")]))
+        self.universe: List[str] = list(scl.get("universe", base))
+        self.tickers: List[str] = list(self.universe)          # 상태는 유니버스 전체 보유
+        # active: 신규 진입 허용 종목. 셀렉터 OFF면 전체 허용.
+        self.active: set = set(self.tickers) if not self.sel_enabled else set()
+        self._last_sel_ts = 0.0
+        self.sel_scores: Dict[str, float] = {}
         self.per_coin = float(pcfg.get("per_coin_krw", 2000000))
         self.n_tranche = int(pcfg.get("tranches", 4))
         self.add_drop = float(pcfg.get("add_drop_pct", 0.02))
@@ -176,6 +189,7 @@ class LiveTrader:
         while not self._stop.is_set():
             try:
                 self._refresh_ai_regime()
+                self._refresh_selection()
                 for tk in self.tickers:
                     self._eval_coin(tk)
                 self._last_update = _now()
@@ -187,6 +201,29 @@ class LiveTrader:
                 if self._stop.is_set():
                     break
                 time.sleep(1)
+
+    # ---------- 동적 종목 선별 ----------
+    def _refresh_selection(self):
+        """주기적으로 유니버스를 점수화해 상위 top_k를 active(신규 진입 허용)로 갱신.
+        신호=변동성조정 모멘텀. 비활성 종목은 보유분 청산만 계속(가둠 방지)."""
+        if not self.sel_enabled:
+            return
+        now = time.time()
+        if self.active and (now - self._last_sel_ts) < self.sel_rebalance_sec:
+            return
+        need = self.sel_period + 2
+        data: Dict[str, "object"] = {}
+        for tk in self.universe:
+            df = backtest.fetch_minutes(tk, self.unit, max(need + 5, 200))
+            if df is not None and len(df) >= need:
+                data[tk] = df
+        if not data:
+            return
+        self.sel_scores = selector.score_table(data, period=self.sel_period)
+        picks = selector.rank_coins(data, top_k=self.sel_top_k, period=self.sel_period)
+        with self._lock:
+            self.active = set(picks)
+        self._last_sel_ts = now
 
     # ---------- AI 시장국면 ----------
     def _refresh_ai_regime(self):
@@ -279,6 +316,7 @@ class LiveTrader:
 
         confirmed = c["confirmed"]
         pos = c["position"]
+        selected = tk in self.active                      # 동적 셀렉터: 신규 진입은 active 종목만
         tier = self._bull_tier()                          # 'strong' | 'moderate' | None
         if tier == "strong":
             cfg_eval, hold_down = self._cfg_bull, self.bull_hold_down
@@ -297,7 +335,7 @@ class LiveTrader:
         # ===== 그리드 모드: 'AI 불장 아님(tier None)'의 SIDEWAYS만 그리드 (합의 미사용 시) =====
         #   불장엔 추세를 타야 하므로 그리드 OFF. 합의가 켜진 코인도 그리드 OFF(합의가 횡보를 직접 담당).
         if self.sideways_grid:
-            if not use_conf and tier is None and confirmed == regime.SIDEWAYS:
+            if selected and not use_conf and tier is None and confirmed == regime.SIDEWAYS:
                 allowed_g, regs_g, mult_g = self._entry_policy()
                 if allowed_g and regime.SIDEWAYS in regs_g:
                     if pos is not None:                   # 직전 UP 잔여 포지션은 청산
@@ -338,9 +376,9 @@ class LiveTrader:
                 if pos["bars_held"] >= self.max_hold:
                     self._sell(tk, price, "timeout"); return
 
-            # 추가(새 봉에서만). 현재 국면이 AI 정책상 허용될 때만(BEAR선 UP 차단).
+            # 추가(새 봉에서만). 현재 국면이 AI 정책상 허용 + 셀렉터 active일 때만(비활성=청산만).
             allowed, regs, mult = self._entry_policy()
-            if new_bar and allowed and confirmed in regs and pos["used"] < self.n_tranche:
+            if new_bar and selected and allowed and confirmed in regs and pos["used"] < self.n_tranche:
                 # 분할매수(fixed): 직전가 -add_drop 하락 + 신호
                 if (mode == "fixed" and sig.should_enter
                         and price <= pos["last_entry"] * (1 - self.add_drop)):
@@ -354,8 +392,8 @@ class LiveTrader:
                         self._buy(tk, price, sig, add=True, size_mult=mult)
             return
 
-        # ----- 미보유: 새 봉 + 신호 + AI 정책상 현재 국면 허용 시 진입 -----
-        if new_bar and sig.should_enter:
+        # ----- 미보유: 셀렉터 active + 새 봉 + 신호 + AI 정책상 현재 국면 허용 시 진입 -----
+        if selected and new_bar and sig.should_enter:
             allowed, regs, mult = self._entry_policy()
             if allowed and confirmed in regs:
                 self._buy(tk, price, sig, add=False, size_mult=mult)

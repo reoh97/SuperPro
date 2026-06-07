@@ -44,6 +44,8 @@ def replay_coin(cfg, tk, bars, ai_view, budget) -> dict:
     c = dict(cfg)
     c["portfolio"] = {**cfg["portfolio"], "tickers": [tk], "per_coin_krw": budget}
     lt = livemod.LiveTrader(c, advisor=None, news=None, state_path=tempfile.mktemp(suffix=".json"))
+    lt.sel_enabled = False          # 단일코인 엔진 검증: 셀렉터 중립화(이 종목 항상 진입가능)
+    lt.active = set(lt.tickers)
     lt.enable()
     for i in range(210, len(bars)):
         state["df"] = bars.iloc[i - 199:i + 1]

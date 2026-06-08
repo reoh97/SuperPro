@@ -27,7 +27,7 @@ except Exception:
 
 # 데이터 폴더 접두사 → 표시 국면명
 REGIME_SETS = [("bull", "상승(BULL)"), ("sideways", "횡보(SIDE)"), ("bear", "약세(BEAR)")]
-THRESHOLDS = [55, 60, 65, 70, 75, 80]
+THRESHOLDS = [80, 85, 88, 91, 94]
 
 
 def run_one(df, cfg) -> tuple:

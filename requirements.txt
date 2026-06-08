@@ -4,3 +4,4 @@ uvicorn>=0.29
 pyyaml>=6.0
 anthropic>=0.40
 feedparser>=6.0
+websockets>=12.0

@@ -128,4 +128,17 @@ def enrich(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     look = int(cfg.get("scalp", {}).get("sideways", {}).get("box_lookback", 40))
     out["box_top"] = out["high"].rolling(look).max().shift(1)
     out["box_bot"] = out["low"].rolling(look).min().shift(1)
+
+    # --- 멀티 타임프레임(MTF): 상위 봉(예: 1시간) 추세 ---
+    #   현재 봉을 상위 봉으로 resample → 상위봉 EMA 정배열이면 htf_up=1.
+    #   forward-fill로 현재 봉마다 '그 시점까지의 상위봉 추세'를 부여(미래참조 없음).
+    htf_min = int(cfg.get("regime", {}).get("htf_min", 0))
+    tf_min = int(cfg.get("timeframe_min", 15))
+    if htf_min and htf_min > tf_min and isinstance(out.index, pd.DatetimeIndex):
+        hc = out["close"].resample(f"{htf_min}min").last().dropna()
+        if len(hc) > 35:
+            hef = ema(hc, 10)            # 상위봉 단기선
+            hes = ema(hc, 30)            # 상위봉 장기선
+            htf_up = (hef > hes).astype(float)
+            out["htf_up"] = htf_up.reindex(out.index, method="ffill")
     return out

@@ -21,10 +21,24 @@ def classify(row, cfg: dict) -> str:
     rcfg = cfg.get("regime", {})
     adx_th = float(rcfg.get("adx_trend", 20))
     persist = bool(rcfg.get("trend_persist", False))   # 추세 지속 인식(상승 중 눌림=UP 유지)
+    htf_gate = bool(rcfg.get("htf_gate", False))        # 멀티 타임프레임: 상위봉 추세와 어긋나면 진입국면 강등
 
     adx = row["adx"]
     close = row["close"]
     ef, em, es = row["ema_fast"], row["ema_mid"], row["ema_slow"]
+
+    def _htf(base: str) -> str:
+        """MTF 게이트: 상위봉 추세와 반대인 추세판정은 SIDEWAYS로 강등(가짜추세 컷)."""
+        if not htf_gate:
+            return base
+        hu = row.get("htf_up", None)
+        if hu is None or hu != hu:           # 정보 없음(NaN) → 게이트 미적용
+            return base
+        if base == UP and hu < 0.5:          # 15분 상승인데 상위봉 하락 → 가짜 → 강등
+            return SIDEWAYS
+        if base == DOWN and hu >= 0.5:        # 15분 하락인데 상위봉 상승 → 눌림 → 강등
+            return SIDEWAYS
+        return base
 
     # EMA 정배열/역배열(추세 구조). '계단식 상승'의 눌림 구간 판별용.
     up_stacked = ef > em > es and close > es
@@ -35,16 +49,16 @@ def classify(row, cfg: dict) -> str:
     #   → 상승장의 쉬어가기 구간을 횡보로 오인해 추세엔진이 못 타던 문제 해결.
     if adx < adx_th:
         if persist and up_stacked:
-            return UP
+            return _htf(UP)
         if persist and down_stacked:
-            return DOWN
+            return _htf(DOWN)
         return SIDEWAYS
 
     up_aligned = ef > em and close > es
     down_aligned = ef < em and close < es
 
     if up_aligned and row["plus_di"] >= row["minus_di"]:
-        return UP
+        return _htf(UP)
     if down_aligned and row["minus_di"] >= row["plus_di"]:
-        return DOWN
+        return _htf(DOWN)
     return SIDEWAYS

@@ -1,0 +1,161 @@
+# ================================================================
+#  config_aggressive.yaml  —  공격형 (P1 안정형의 고위험·고수익 변형)
+#  실행:  python run.py config_aggressive.yaml
+#
+#  [공격] 태그가 안정형(config.yaml)과 다른 곳. 핵심 = "불장 승자를 길게 태운다".
+#  ⚠️ 수익↑ 이지만 낙폭(MDD)↑·변동성↑. 한 달 데이터 기반이라 과적합 위험.
+#     반드시 모의(paper)로 안정형과 나란히 비교 후 판단할 것.
+# ================================================================
+mode: paper
+ticker: KRW-BTC
+strategy:
+  k: 0.5
+  ma_period: 5
+trade:
+  invest_ratio: 0.5
+  fee: 0.0005
+  min_order_krw: 5000
+loop:
+  interval_sec: 10
+ai:
+  enabled: true
+  model: claude-haiku-4-5
+  min_confidence: 60
+  min_interval_sec: 900
+  regime_interval_sec: 900
+  news_max_items: 12
+  news_cache_sec: 900
+  bear_defensive: true       # 약세 방어는 공격형도 유지(이거 끄면 약세장 파멸)
+  bear_size_mult: 1.0
+news_feeds:
+- https://www.coindesk.com/arc/outboundfeeds/rss/
+- https://cointelegraph.com/rss
+- https://decrypt.co/feed
+timeframe_min: 15
+indicators:
+  ema_fast: 20
+  ema_mid: 50
+  ema_slow: 200
+  rsi: 14
+  atr: 14
+  adx: 14
+  bb: 20
+  bb_mult: 2.0
+regime:
+  adx_trend: 20
+confluence:
+  live: true
+  enabled: false
+  ai_gated: true
+  threshold: 80              # [공격] 85→80: 진입 더 자주(거래수↑). 스윕상 횡보/상승 수익↑
+  regimes: null
+  meanrev_rsi_low: 35
+  meanrev_rsi_high: 70
+  atr_pct_min: 0.002
+  atr_pct_max: 0.030
+  indicators:
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+    stoch_k: 14
+    stoch_d: 3
+    vol_ma: 20
+    obv_ema: 20
+  weights:
+    UP:       {trend: 2.0, momentum: 1.5, meanrev: 0.0, volatility: 0.5, volume: 1.0}
+    SIDEWAYS: {trend: 0.5, momentum: 1.0, meanrev: 2.0, volatility: 0.5, volume: 1.0}
+    DOWN:     {trend: 1.0, momentum: 1.0, meanrev: 1.5, volatility: 0.5, volume: 1.0}
+  exits:
+    UP:       {mode: trail, sl_pct: 0.02, trail_pct: 0.06}   # [공격] 4%→6%: 합의 UP 승자 길게
+    SIDEWAYS: {mode: fixed, tp_pct: 0.006, sl_pct: 0.010}
+    DOWN:     {mode: fixed, tp_pct: 0.006, sl_pct: 0.008}
+scalp:
+  min_profit_buffer: 0.002
+  max_hold_bars: 480
+  confirm_bars: 3
+  exit_on_down: true
+  bull_mode:
+    enabled: true
+    min_confidence: 60
+    strong_confidence: 75
+    require_adx_rising: false
+    trail_pct: 0.07          # [공격] 5%→7%: 불장 강함티어 승자 더 길게(이게 불장 수익의 핵심 레버)
+    hold_through_down: true
+    pyramid: true
+    pyramid_step: 0.03
+    moderate:
+      require_adx_rising: true
+      trail_pct: 0.045       # [공격] 3%→4.5%: 적당불장도 추세 더 길게
+      hold_through_down: false
+  uptrend:
+    enabled: true
+    mode: trail
+    require_adx_rising: true
+    pyramid: false
+    pyramid_step: 0.04
+    sl_pct: 0.02
+    trail_pct: 0.04          # [공격] 2.5%→4%: 일반 상승진입 승자 길게
+    tp_pct: 0.011
+  sideways:
+    mode: range
+    grid_enabled: true
+    grid_step: 0.012
+    grid_levels: 8
+    grid_stop: 0.05
+    require_bounce: true
+    box_lookback: 40
+    min_box_pct: 0.015
+    max_box_pct: 0.06
+    entry_zone: 0.25
+    tp_zone: 0.9
+    quick_tp_pct: 0.005
+    sl_below: 0.004
+    tp_pct: 0.005
+    sl_pct: 0.004
+    rsi_buy: 32
+    require_above_slow: true
+  downtrend:
+    enabled: false
+    tp_pct: 0.03
+    sl_pct: 0.008
+    rsi_buy: 22
+portfolio:
+  total_krw: 20000000
+  per_coin_krw: 2000000
+  tickers:
+  - KRW-BTC
+  - KRW-ETH
+  - KRW-XRP
+  - KRW-SOL
+  - KRW-ADA
+  - KRW-DOGE
+  - KRW-TRX
+  - KRW-LINK
+  - KRW-AVAX
+  - KRW-DOT
+  tranches: 2                # [공격] 4→2: 첫 진입에 50% 투입(자본 더 적극). 수익↑·낙폭↑
+  add_drop_pct: 0.02
+  tp_pct: 0.02
+  hard_sl_pct: 0.06
+  max_hold_bars: 480
+selector:
+  enabled: false             # 기본 OFF(분산 유지). 더 공격적으로 집중하려면 true+top_k 2~3
+  top_k: 3
+  period: 96
+  rebalance_hours: 24
+  universe:
+  - KRW-BTC
+  - KRW-ETH
+  - KRW-XRP
+  - KRW-SOL
+  - KRW-ADA
+  - KRW-DOGE
+  - KRW-TRX
+  - KRW-LINK
+  - KRW-AVAX
+  - KRW-DOT
+paper:
+  initial_krw: 1000000
+upbit:
+  access_key: ''
+  secret_key: ''

@@ -20,13 +20,24 @@ def classify(row, cfg: dict) -> str:
     """지표가 채워진 한 행(row)을 받아 국면 문자열 반환."""
     rcfg = cfg.get("regime", {})
     adx_th = float(rcfg.get("adx_trend", 20))
+    persist = bool(rcfg.get("trend_persist", False))   # 추세 지속 인식(상승 중 눌림=UP 유지)
 
     adx = row["adx"]
     close = row["close"]
     ef, em, es = row["ema_fast"], row["ema_mid"], row["ema_slow"]
 
-    # 추세가 약하면 횡보
+    # EMA 정배열/역배열(추세 구조). '계단식 상승'의 눌림 구간 판별용.
+    up_stacked = ef > em > es and close > es
+    down_stacked = ef < em < es and close < es
+
+    # 추세가 약하면(눌림/쉬어가기) 기본 횡보.
+    #   단 trend_persist면, EMA가 명확한 정/역배열일 때 '추세 중 눌림'으로 보고 추세 유지.
+    #   → 상승장의 쉬어가기 구간을 횡보로 오인해 추세엔진이 못 타던 문제 해결.
     if adx < adx_th:
+        if persist and up_stacked:
+            return UP
+        if persist and down_stacked:
+            return DOWN
         return SIDEWAYS
 
     up_aligned = ef > em and close > es

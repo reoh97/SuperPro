@@ -43,6 +43,7 @@ indicators:
   bb_mult: 2.0
 regime:
   adx_trend: 20
+  trend_persist: true        # 상승 중 눌림=UP 유지(불장 참여↑). 검증: 불장 2.7배·횡보 유지
 confluence:
   live: true
   enabled: false

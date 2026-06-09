@@ -122,6 +122,13 @@ def enrich(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         out["vol_ma"] = out["volume"].rolling(cind.get("vol_ma", 20)).mean()
         out["obv"] = obv(out["close"], out["volume"])
         out["obv_ema"] = ema(out["obv"], cind.get("obv_ema", 20))
+        # 차이킨 머니플로우(CMF): 매수세/매도세 — 종가가 봉의 어디서 닫혔나 × 거래량.
+        #   MFM=((C-L)-(H-C))/(H-L) [-1~+1], CMF=ΣMFM·V / ΣV. +면 매수세, -면 매도세 우위.
+        rng = (out["high"] - out["low"]).replace(0.0, np.nan)
+        mfm = ((out["close"] - out["low"]) - (out["high"] - out["close"])) / rng
+        mfv = (mfm * out["volume"]).fillna(0.0)
+        n_cmf = cind.get("cmf", 20)
+        out["cmf"] = mfv.rolling(n_cmf).sum() / out["volume"].rolling(n_cmf).sum().replace(0.0, np.nan)
 
     # 박스권(레인지) 상/하단: 최근 lookback 봉의 고점/저점.
     # shift(1)로 '직전까지' 형성된 박스를 사용 (현재봉으로 박스를 정의하는 미래참조 방지)

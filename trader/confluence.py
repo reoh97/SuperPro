@@ -144,6 +144,10 @@ def _volume(prev, row, cfg) -> Optional[float]:
             v.append(0.0)
     if _finite(row.get("obv")) and _finite(row.get("obv_ema")):
         v.append(1.0 if row["obv"] > row["obv_ema"] else -1.0)
+    # 매수세/매도세(CMF): use_flow일 때만. +0.05↑=매수세 우위, -0.05↓=매도세 우위.
+    if cfg.get("confluence", {}).get("use_flow", False) and _finite(row.get("cmf")):
+        c = float(row["cmf"])
+        v.append(1.0 if c > 0.05 else (-1.0 if c < -0.05 else 0.0))
     return _avg(v)
 
 

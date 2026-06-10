@@ -90,6 +90,8 @@ class LiveTrader:
         mod = bm.get("moderate", {})                                            # 적당 티어
         self.bull_mod_hold_down = bool(mod.get("hold_through_down", False))
         self.bull_mod_size = float(mod.get("size_mult", 1.0))                    # 적당 첫진입 배수(1=25%, 4=100%)
+        self.bull_mod_pyramid = bool(mod.get("pyramid", False))                  # 적당 불타기(확인후 노는자본 투입)
+        self.bull_mod_pyramid_step = float(mod.get("pyramid_step", 0.03))
         self._cfg_bull_mod = copy.deepcopy(cfg)
         um = self._cfg_bull_mod.setdefault("scalp", {}).setdefault("uptrend", {})
         um["require_adx_rising"] = bool(mod.get("require_adx_rising", True))
@@ -384,10 +386,14 @@ class LiveTrader:
                 if (mode == "fixed" and sig.should_enter
                         and price <= pos["last_entry"] * (1 - self.add_drop)):
                     self._buy(tk, price, sig, add=True, size_mult=mult)
-                # 불타기(trail): 강한 상승(strong) 티어에서만 보루를 승자에 추가. 직전가 +step 상승 + UP 지속.
+                # 불타기(trail): 승자에 추가. strong은 항상, moderate는 mod.pyramid면(노는 자본 확인후 투입).
                 else:
-                    pyr_on = self.bull_pyramid if tier == "strong" else self.pyramid
-                    pyr_step = self.bull_pyramid_step if tier == "strong" else self.pyramid_step
+                    if tier == "strong":
+                        pyr_on, pyr_step = self.bull_pyramid, self.bull_pyramid_step
+                    elif tier == "moderate":
+                        pyr_on, pyr_step = self.bull_mod_pyramid, self.bull_mod_pyramid_step
+                    else:
+                        pyr_on, pyr_step = self.pyramid, self.pyramid_step
                     if (mode == "trail" and pyr_on and confirmed == regime.UP
                             and price >= pos["last_entry"] * (1 + pyr_step)):
                         self._buy(tk, price, sig, add=True, size_mult=mult)

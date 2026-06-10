@@ -139,7 +139,8 @@ scalp:
     rsi_buy: 22              # 깊은 과매도에서만(27→22). 얕으면 반등실패로 대량손실
 portfolio:
   total_krw: 20000000        # 총자본 2,000만원
-  per_coin_krw: 2000000      # 종목당 200만원
+  per_coin_krw: 800000       # ★ 2엔진 분할: 단기 전술 800만(40%) → 종목당 80만. (장기는 longterm 섹션)
+                             #   원래 200만 단일운영 시 이 값을 2000000으로. 분할비율 바꾸려면 여기+longterm 조정.
   tickers:                   # 원화마켓 시총/거래량 상위 메이저 10
   - KRW-BTC
   - KRW-ETH
@@ -165,6 +166,25 @@ selector:                    # 동적 종목 선별 — 매 주기 '한 방' 후
   period: 96                 # 모멘텀 측정 구간(봉). 15분봉 96 = 1일.
   rebalance_hours: 24        # 재선별 주기(시간). 너무 잦으면 회전비용↑, 너무 길면 추세 놓침.
   universe:                  # 후보 풀. 여기서 top_k를 자동 선별(고정 바스켓 아님).
+  - KRW-BTC
+  - KRW-ETH
+  - KRW-XRP
+  - KRW-SOL
+  - KRW-ADA
+  - KRW-DOGE
+  - KRW-TRX
+  - KRW-LINK
+  - KRW-AVAX
+  - KRW-DOT
+longterm:                    # 중장기 추세추종 엔진(일봉) — 단타봇과 별도 자본·상태로 병행(충돌 없음)
+  enabled: true              # 검증(일봉 3년): +76%/낙폭33% vs 그냥보유 +8%/72%. 하락장 자동회피.
+  per_coin_krw: 1200000      # ★ 장기 코어: 종목당 120만 (×10 = 1,200만, 총자본의 60%)
+  entry_n: 50                # 진입: 최근 50일 고점 돌파
+  exit_n: 20                 # 청산: 최근 20일 저점 이탈
+  atr_k: 3.0                 # 청산: 고점 − ATR×3 (샹들리에 손절)
+  ma_n: 200                  # 200일선 위(상승추세)에서만 진입
+  interval_sec: 3600         # 1시간마다 체크(일봉이라 충분, 저빈도)
+  tickers:                   # 단타봇과 같은 10종목(자본 풀만 분리)
   - KRW-BTC
   - KRW-ETH
   - KRW-XRP

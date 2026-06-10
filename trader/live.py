@@ -89,6 +89,7 @@ class LiveTrader:
         ub["trail_pct"] = float(bm.get("trail_pct", 0.04))
         mod = bm.get("moderate", {})                                            # 적당 티어
         self.bull_mod_hold_down = bool(mod.get("hold_through_down", False))
+        self.bull_mod_size = float(mod.get("size_mult", 1.0))                    # 적당 첫진입 배수(1=25%, 4=100%)
         self._cfg_bull_mod = copy.deepcopy(cfg)
         um = self._cfg_bull_mod.setdefault("scalp", {}).setdefault("uptrend", {})
         um["require_adx_rising"] = bool(mod.get("require_adx_rising", True))
@@ -396,6 +397,9 @@ class LiveTrader:
         if selected and new_bar and sig.should_enter:
             allowed, regs, mult = self._entry_policy()
             if allowed and confirmed in regs:
+                # 적당 불장: 첫 진입 크기를 size_mult로 조절(1트랜치=25%, 4=100%)
+                if tier == "moderate":
+                    mult *= self.bull_mod_size
                 self._buy(tk, price, sig, add=False, size_mult=mult)
 
     # ---------- 체결(모의) ----------

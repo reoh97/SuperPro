@@ -114,7 +114,8 @@ scalp:
     tp_pct: 0.011            # fixed 모드용 익절(미사용)
   sideways:                  # 횡보장: 그리드(칸칸이 발라먹기) — 라이브 기본. 박스(range)는 백테스트/대안.
     mode: range              # 백테스트 엔진용(range=박스). 라이브는 아래 grid_enabled가 우선.
-    grid_enabled: true       # 라이브: SIDEWAYS를 그리드로 운용. 실 KRW 검증: 비국면 손실 -1.59%→-0.37%(4배↓)
+    grid_enabled: false      # OFF: 횡보는 합의(confluence)엔진이 담당(검증: 합의 +1.62% vs 그리드 -0.46%).
+                             #   합의가 우선이라 어차피 안 돌았음 → 혼동방지 위해 명시적 OFF. (합의 끄면 그리드 부활)
     grid_step: 0.012         #   칸 간격 1.2%(매수 -1.2%마다, 매도 +1.2% 반등마다)
     grid_levels: 8           #   최대 8칸(종목당 200만÷8=25만/칸)
     grid_stop: 0.05          #   최저매수가 -5% 이탈 시 전량청산(범위붕괴=가방 회피)

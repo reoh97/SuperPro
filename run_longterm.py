@@ -31,7 +31,17 @@ def main():
     if not cfg.get("longterm", {}).get("enabled", False):
         print("config.yaml 의 longterm.enabled 가 false 입니다. true 로 바꾸세요."); return
 
-    engine = LongTrendTrader(cfg, state_path=os.path.join(BASE, "data", "longterm_paper.json"))
+    mode = cfg.get("mode", "paper")
+    state_path = os.path.join(BASE, "data", f"longterm_{mode}.json")
+    # 실거래: 새틀라이트와 한 계정 공유. 각 엔진은 자기 서브장부(state)로만 사이징/청산.
+    broker = None
+    if mode == "live":
+        from trader.account import LedgerBroker
+        up = cfg.get("upbit", {})
+        broker = LedgerBroker(up.get("access_key", ""), up.get("secret_key", ""),
+                              fee=float(cfg.get("trade", {}).get("fee", 0.0005)))
+        print("⚠️ 실거래 모드(코어): 장부기반 단일계정 브로커. reconcile.py로 정합성 점검 권장.")
+    engine = LongTrendTrader(cfg, state_path=state_path, broker=broker)
     engine.start_loop()
     engine.enable()
 

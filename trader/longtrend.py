@@ -35,7 +35,8 @@ def _now() -> str:
 
 
 class LongTrendTrader:
-    def __init__(self, cfg: dict, state_path: str = "data/longterm_paper.json"):
+    def __init__(self, cfg: dict, state_path: str = "data/longterm_paper.json",
+                 broker=None):
         lt = cfg.get("longterm", {})
         pcfg = cfg.get("portfolio", {})
         self.tickers: List[str] = list(lt.get("tickers", pcfg.get("tickers", ["KRW-BTC"])))
@@ -48,6 +49,7 @@ class LongTrendTrader:
         self.fee = float(cfg.get("trade", {}).get("fee", 0.0005))
         self.unit = int(lt.get("unit", 1))             # 1=일봉
         self.state_path = state_path
+        self.broker = broker        # None=모의 회계 / LedgerBroker=단일계정 실주문(자기 장부 기준)
 
         self.coins: Dict[str, dict] = {}
         self._thread: Optional[threading.Thread] = None
@@ -156,9 +158,16 @@ class LongTrendTrader:
         spend = c["cash"]
         if spend < 5000 or price <= 0:
             return
-        fee = spend * self.fee
-        size = (spend - fee) / price
-        c["cash"] = 0.0
+        # 모의=즉시체결 가정 / 라이브=실주문 후 실체결로 회계(자기 서브예산 spend만 사용)
+        if self.broker is None:
+            fee = spend * self.fee
+            size = (spend - fee) / price
+        else:
+            f = self.broker.execute_buy(tk, spend)
+            if f is None:
+                return
+            price, size, fee, spend = f.price, f.volume, f.fee, f.krw
+        c["cash"] -= spend
         c["position"] = {"entry": price, "size": size, "cost": spend, "peak": price, "time": _now()}
         c["trades"].append({"time": _now(), "side": "buy", "price": price, "amount": spend})
 
@@ -167,8 +176,15 @@ class LongTrendTrader:
         p = c["position"]
         if p is None:
             return
-        gross = price * p["size"]
-        fee = gross * self.fee
+        # 자기가 산 수량(p["size"])만 매도 → 상대 엔진 코인 불가침
+        if self.broker is None:
+            gross = price * p["size"]
+            fee = gross * self.fee
+        else:
+            f = self.broker.execute_sell(tk, p["size"])
+            if f is None:
+                return
+            price, gross, fee = f.price, f.krw, f.fee
         c["cash"] += gross - fee
         net = (gross - fee) - p["cost"]
         c["realized_pnl"] += net

@@ -37,11 +37,13 @@ def _now() -> str:
 
 class LiveTrader:
     def __init__(self, cfg: dict, advisor: Optional[AIAdvisor] = None,
-                 news: Optional[NewsFeed] = None, state_path: str = "data/live_paper.json"):
+                 news: Optional[NewsFeed] = None, state_path: str = "data/live_paper.json",
+                 broker=None):
         self.cfg = cfg
         self.advisor = advisor
         self.news = news
         self.state_path = state_path
+        self.broker = broker        # None=모의 회계 / LedgerBroker=단일계정 실주문(자기 장부 기준)
 
         pcfg = cfg.get("portfolio", {})
         # 동적 셀렉터: 유니버스 전체를 들고 상태관리하되, '신규 진입'은 상위 top_k(active)만 허용.
@@ -417,8 +419,15 @@ class LiveTrader:
         spend = min(self._tranche_krw() * size_mult, c["cash"])
         if spend <= 0 or price <= 0:
             return
-        fee = spend * self.fee
-        vol = (spend - fee) / price
+        # 모의=즉시체결 / 라이브=실주문 후 실체결 회계(자기 서브예산 spend만 사용)
+        if self.broker is None:
+            fee = spend * self.fee
+            vol = (spend - fee) / price
+        else:
+            f = self.broker.execute_buy(tk, spend)
+            if f is None:
+                return
+            price, vol, fee, spend = f.price, f.volume, f.fee, f.krw
         c["cash"] -= spend
         if add and c["position"] is not None:
             p = c["position"]
@@ -445,8 +454,15 @@ class LiveTrader:
         if p is None:
             return
         vol = p["size"]
-        gross = price * vol
-        fee = gross * self.fee
+        # 자기가 산 수량(vol)만 매도 → 상대 엔진 코인 불가침
+        if self.broker is None:
+            gross = price * vol
+            fee = gross * self.fee
+        else:
+            f = self.broker.execute_sell(tk, vol)
+            if f is None:
+                return
+            price, vol, gross, fee = f.price, f.volume, f.krw, f.fee
         c["cash"] += gross - fee
         net = (gross - fee) - (p["cost"] + p["fees"])
         c["realized_pnl"] += net
@@ -463,42 +479,53 @@ class LiveTrader:
         spend = min(self._grid_unit_krw() * size_mult, c["cash"])
         if spend <= 0 or price <= 0:
             return
-        fee = spend * self.fee
-        size = (spend - fee) / price
+        if self.broker is None:
+            fee = spend * self.fee
+            size = (spend - fee) / price
+        else:
+            f = self.broker.execute_buy(tk, spend)
+            if f is None:
+                return
+            price, size, fee, spend = f.price, f.volume, f.fee, f.krw
         c["cash"] -= spend
         c.setdefault("grid", []).append({"price": float(price), "size": size, "cost": spend - fee})
         c["trades"].append({"time": _now(), "side": "buy", "price": price, "volume": size,
                             "amount": spend, "fee": fee, "reason": "grid"})
 
-    def _grid_sell_unit(self, tk: str, c: dict, unit: dict, price: float):
+    def _grid_sell_unit(self, tk: str, c: dict, unit: dict, price: float) -> bool:
         size = unit["size"]
-        gross = price * size
-        fee = gross * self.fee
+        # 자기 칸 수량(size)만 매도. 라이브 주문 실패 시 False → 호출부가 칸 유지.
+        if self.broker is None:
+            gross = price * size
+            fee = gross * self.fee
+        else:
+            f = self.broker.execute_sell(tk, size)
+            if f is None:
+                return False
+            price, size, gross, fee = f.price, f.volume, f.krw, f.fee
         c["cash"] += gross - fee
         net = (gross - fee) - unit["cost"]
         c["realized_pnl"] += net
         c["trades"].append({"time": _now(), "side": "sell", "price": price, "volume": size,
                             "amount": gross, "fee": fee, "pnl": net, "reason": "grid"})
+        return True
 
     def _liquidate_grid(self, tk: str, c: dict, price: float):
         grid = c.get("grid")
         if not grid:
             return
-        for unit in grid:
-            self._grid_sell_unit(tk, c, unit, price)
-        c["grid"] = []
+        c["grid"] = [u for u in grid if not self._grid_sell_unit(tk, c, u, price)]
 
     def _run_grid(self, tk: str, c: dict, price: float, new_bar: bool, size_mult: float = 1.0):
         grid = c.setdefault("grid", [])
         # 바닥이탈 손절(가방 컷): 최저 매수가 -grid_stop 아래로 깨지면 전량청산
         if grid and price <= min(u["price"] for u in grid) * (1 - self.grid_stop):
             self._liquidate_grid(tk, c, price); return
-        # 매도: 각 칸을 매수가 +grid_step 반등에 청산
+        # 매도: 각 칸을 매수가 +grid_step 반등에 청산(라이브 실패 시 칸 유지)
         remain = []
         for u in grid:
-            if price >= u["price"] * (1 + self.grid_step):
-                self._grid_sell_unit(tk, c, u, price)
-            else:
+            sell = price >= u["price"] * (1 + self.grid_step)
+            if not sell or not self._grid_sell_unit(tk, c, u, price):
                 remain.append(u)
         c["grid"] = remain
         # 매수: 새 봉에서 한 칸씩. 직전 최저매수가 -step 하락(비었으면 현재가 시드).

@@ -54,7 +54,14 @@ def build_engine(cfg: dict) -> LiveTrader:
         cache_sec=int(ai_cfg.get("news_cache_sec", 900)),
         max_items=int(ai_cfg.get("news_max_items", 12)),
     )
-    return LiveTrader(cfg, advisor=advisor, news=news, state_path=state_path)
+    # 실거래: 단일계정 장부기반 브로커(자기 서브예산/수량만 사용 → 코어 엔진과 한 계정 공유 안전)
+    broker = None
+    if mode == "live":
+        from trader.account import LedgerBroker
+        up = cfg.get("upbit", {})
+        broker = LedgerBroker(up.get("access_key", ""), up.get("secret_key", ""),
+                              fee=float(cfg["trade"]["fee"]))
+    return LiveTrader(cfg, advisor=advisor, news=news, state_path=state_path, broker=broker)
 
 
 def main():
@@ -79,7 +86,8 @@ def main():
         why = engine.advisor.disabled_reason if engine.advisor else "비활성"
         print(f"AI 장세:   미사용 - {why}")
     if mode == "live":
-        print("⚠️ 주의: 새 멀티코인 엔진은 아직 '모의 회계'만 합니다. 실주문 미연결(안전).")
+        print("⚠️ 실거래 모드: 장부기반 단일계정 브로커로 실주문 실행. "
+              "코어(run_longterm.py)와 한 계정 공유 가능 — reconcile.py로 정합성 점검 권장.")
     print("대시보드:  http://127.0.0.1:8000\n")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
 

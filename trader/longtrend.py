@@ -208,10 +208,13 @@ class LongTrendTrader:
                 "avg": pos["entry"] if pos else None,
                 "pnl_pct": ((c["price"] / pos["entry"] - 1) * 100) if pos and c["price"] else None,
                 "realized": c["realized_pnl"], "equity": eq,
+                "unrealized": (pos["size"] * (c["price"] - pos["entry"])) if (pos and c["price"]) else 0.0,
+                "recent_trades": list(reversed(c["trades"][-5:])),
             })
         return {
             "engine": "longterm", "running": self.is_enabled(),
             "total_equity": tot_eq, "total_base": tot_base,
+            "total_realized": sum(c["realized_pnl"] for c in self.coins.values()),
             "total_pnl_pct": (tot_eq / tot_base - 1) * 100 if tot_base else 0.0,
             "last_update": self._last_update, "error": self._last_error,
             "coins": coins,

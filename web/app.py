@@ -40,3 +40,29 @@ def create_app(engine: Engine) -> FastAPI:
         return {"running": False}
 
     return app
+
+
+def create_combined_app(satellite, core) -> FastAPI:
+    """좌(새틀라이트)·우(코어) 2엔진 통합 대시보드. 두 엔진을 한 프로세스에서 구동.
+
+    satellite: LiveTrader (snapshot())  /  core: LongTrendTrader (status())
+    """
+    app = FastAPI(title="SuperPro — 코어/새틀라이트 통합 대시보드")
+
+    @app.get("/")
+    def index():
+        return FileResponse(os.path.join(_HERE, "dashboard.html"))
+
+    @app.get("/api/status")
+    def status():
+        return JSONResponse({"satellite": satellite.snapshot(), "core": core.status()})
+
+    @app.post("/api/{who}/{action}")
+    def control(who: str, action: str):
+        eng = satellite if who == "satellite" else core if who == "core" else None
+        if eng is None or action not in ("start", "stop"):
+            return JSONResponse({"error": "bad request"}, status_code=400)
+        (eng.enable if action == "start" else eng.disable)()
+        return {"who": who, "running": action == "start"}
+
+    return app

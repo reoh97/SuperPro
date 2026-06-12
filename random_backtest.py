@@ -118,6 +118,7 @@ def main():
         print("데이터가 짧아 무작위 윈도우를 못 만듭니다."); return
 
     core_r, core_m, comb_r, comb_m, sat_r, bh_r = [], [], [], [], [], []
+    comb_days = []
     used = 0
     for _ in range(N):
         s_idx = int(rng.integers(lo, hi))
@@ -141,7 +142,7 @@ def main():
             continue
         core_r.append(sc["ret"]); core_m.append(sc["mdd"])
         sat_r.append(ss["ret"])
-        comb_r.append(scb["ret"]); comb_m.append(scb["mdd"])
+        comb_r.append(scb["ret"]); comb_m.append(scb["mdd"]); comb_days.append(scb["days"])
         bh_r.append(sbh["ret"])
         used += 1
 
@@ -162,6 +163,21 @@ def main():
     print(f"  • 합산 양수 윈도우 비율 {(np.array(comb_r)>0).mean()*100:.0f}% "
           f"(그냥보유 {(bh>0).mean():.0%}) — 무작위 진입에서도 이기는 빈도")
     print(f"  • 합산이 그냥보유 이긴 윈도우 {(cb>bh).mean()*100:.0f}%")
+    # ---- 2,000만원 기준 금액 + 월 환산 ----
+    CAP = 20_000_000
+    cr = np.array(comb_r); cd = np.array(comb_days)
+    monthly = (1 + cr) ** (30.0 / cd) - 1            # 윈도우별 '한 달 환산' 수익률
+    print(f"\n  [2,000만원 투자 시 — 합산 75/25]")
+    print(f"  • 윈도우 전체기간 수익(평균 {cd.mean()/30:.1f}개월): "
+          f"보통(중앙) {np.median(cr)*100:+.1f}% = {np.median(cr)*CAP:+,.0f}원  / "
+          f"평균 {cr.mean()*100:+.1f}% = {cr.mean()*CAP:+,.0f}원")
+    print(f"  • 월 환산 수익률: 보통(중앙) {np.median(monthly)*100:+.2f}%/월  / "
+          f"평균 {monthly.mean()*100:+.2f}%/월")
+    print(f"  • 월 환산 금액(2천만): 보통 {np.median(monthly)*CAP:+,.0f}원/월  / "
+          f"평균 {monthly.mean()*CAP:+,.0f}원/월")
+    print(f"  • 월수익 분포: 하위10% {np.percentile(monthly,10)*100:+.2f}%/월 "
+          f"({np.percentile(monthly,10)*CAP:+,.0f}원) · 상위10% {np.percentile(monthly,90)*100:+.2f}%/월 "
+          f"({np.percentile(monthly,90)*CAP:+,.0f}원)")
     print(f"  ※ *새틀은 국면조건부 근사(연속 15분봉 부재). 코어는 실엔진 정확. 과거≠미래.")
 
 

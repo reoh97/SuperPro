@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
+import traceback
 
 import uvicorn
 import yaml
@@ -21,6 +24,7 @@ from trader.ai_advisor import AIAdvisor
 from trader.live import LiveTrader
 from trader.longtrend import LongTrendTrader
 from trader.news import NewsFeed
+from trader.safety import Notifier, RiskGuard
 from web.app import create_combined_app
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -43,6 +47,67 @@ def load_dotenv(path: str) -> None:
             key, val = key.strip(), val.strip().strip('"').strip("'")
             if key and key not in os.environ:
                 os.environ[key] = val
+
+
+def _start_monitor(satellite, core, guard, notifier, cfg, mode):
+    """감시 스레드: 합산자산→차단기, 새 체결·에러 알림, 생존신호(heartbeat)."""
+    poll = max(int(cfg.get("safety", {}).get("poll_sec", 30)), 10)
+    hb_min = float(cfg.get("safety", {}).get("heartbeat_min", 60))
+    state = {"seen_trade": "", "last_err": "", "last_hb": 0.0}
+
+    def equity_of():
+        s = satellite.snapshot(); c = core.status()
+        return (s["total"]["equity"], c["total_equity"],
+                s["total"]["equity"] + c["total_equity"], s, c)
+
+    def collect_trades(snap_sat, snap_core):
+        rows = []
+        for c in snap_sat.get("coins", []):
+            for t in (c.get("recent_trades") or []):
+                rows.append((t.get("time", ""), c["ticker"], t))
+        for c in snap_core.get("coins", []):
+            for t in (c.get("recent_trades") or []):
+                rows.append((t.get("time", ""), c["ticker"], t))
+        return sorted(rows)
+
+    def loop():
+        notifier.send(f"🤖 <b>SuperPro 가동</b> ({'실거래' if mode=='live' else '모의'}) — "
+                      f"코어+새틀 감시 시작. 차단기 낙폭 -{guard.max_dd*100:.0f}%/일일 -{guard.max_daily*100:.0f}%")
+        while True:
+            try:
+                eq_s, eq_c, eq_tot, snap_s, snap_c = equity_of()
+                # 1) 차단기
+                halted = guard.update(eq_tot)
+                satellite.set_halt(halted); core.set_halt(halted)
+                # 2) 새 체결 알림
+                if notifier.notify_trades:
+                    for tm, tk, t in collect_trades(snap_s, snap_c):
+                        if tm > state["seen_trade"]:
+                            state["seen_trade"] = tm
+                            side = "🟦매수" if t.get("side") == "buy" else "🟧매도"
+                            pnl = t.get("pnl")
+                            extra = (f" 손익 {pnl:+,.0f}원" if pnl is not None else "")
+                            notifier.send(f"{side} {tk.replace('KRW-','')} @ {t.get('price'):,.0f}"
+                                          f"{extra}  <i>{t.get('reason','')}</i>")
+                # 3) 에러 알림
+                if notifier.notify_errors:
+                    err = snap_s.get("last_error") or snap_c.get("error") or ""
+                    if err and err != state["last_err"]:
+                        state["last_err"] = err
+                        notifier.send(f"⚠️ <b>엔진 오류</b>\n{err.splitlines()[-1][:200]}")
+                # 4) 생존신호
+                now = time.time()
+                if hb_min > 0 and now - state["last_hb"] >= hb_min * 60:
+                    state["last_hb"] = now
+                    tag = "🔴차단중" if halted else "🟢정상"
+                    notifier.send(f"💓 {tag} 합산 {eq_tot:,.0f}원 "
+                                  f"(새틀 {eq_s:,.0f} / 코어 {eq_c:,.0f})")
+            except Exception:
+                if notifier.notify_errors:
+                    notifier.send(f"⚠️ 감시 스레드 예외\n{traceback.format_exc(limit=2)[:200]}")
+            time.sleep(poll)
+
+    threading.Thread(target=loop, daemon=True).start()
 
 
 def main():
@@ -78,6 +143,12 @@ def main():
 
     satellite.start_loop()
     core.start_loop()       # 둘 다 평가 루프 기동(매매는 대시보드에서 활성화)
+
+    # ── 운영 안전망: 차단기 + 텔레그램 알림 감시 스레드 ──
+    notifier = Notifier(cfg)
+    guard = RiskGuard(cfg, state_path=os.path.join(BASE, "data", f"riskguard_{mode}.json"),
+                      notifier=notifier)
+    _start_monitor(satellite, core, guard, notifier, cfg, mode)
 
     app = create_combined_app(satellite, core)
     print("=" * 64)

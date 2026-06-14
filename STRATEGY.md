@@ -164,5 +164,14 @@ AI가 BULL을 줄 때, **확신도(confidence)**로 강도를 3단 분기. 그 �
 - **정합성 감시**(`reconcile.py`): (코어+새틀 장부 합) vs 실계정 잔고 대조. KRW 부족·코인수량
   드리프트(부분체결·슬리피지·수동입출금·버그) 경보. cron으로 N분마다 권장. 종료코드 0/1/2.
 
+### 6.3 운영 안전망 (`trader/safety.py`, `run_all.py` 감시스레드, `deploy/`)
+실전 투입 전 필수 — 봇이 폭주(연속손실)하거나 조용히 멈춰도 ①막고 ②알린다.
+- **차단기(RiskGuard)**: 합산자산 고점대비 `safety.max_drawdown_pct`(기본 -15%) 또는 당일
+  `max_daily_loss_pct`(기본 -5%) 초과 시 **양 엔진 신규진입 전면중단**(`set_halt`). 보유분은
+  전략대로 청산 계속(급매 안 함). 일일차단은 다음 거래일 자동해제. 상태 `data/riskguard_*.json` 영속.
+- **알림(Notifier, 텔레그램)**: 가동·체결·오류·차단·생존신호. 미설정이면 자동 no-op. 표준 라이브러리만.
+- **자동 재시작**: `deploy/superpro.service`(systemd, Restart=always) — 정전·크래시 복귀. 폭주방지 burst 제한.
+- 한계: 차단기는 '신규차단'(block)까지. 강제 전량청산(liquidate)·변동성 사이징은 미구현(후속).
+
 ---
 *변경 시 이 문서를 같이 갱신할 것. 코드 진실원본은 config.yaml + trader/.*

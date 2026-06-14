@@ -205,3 +205,15 @@ paper:
 upbit:
   access_key: ''
   secret_key: ''
+safety:                      # 운영 안전망 — 차단기(run_all.py 감시스레드가 합산자산으로 작동)
+  enabled: true
+  max_drawdown_pct: 0.15     # 합산자산 고점대비 -15% → 신규진입 전면중단(보유분은 전략대로 청산)
+  max_daily_loss_pct: 0.05   # 당일 -5% → 신규진입 중단(다음 거래일 자동 해제)
+  poll_sec: 30               # 감시 주기(초): 합산자산 점검·알림
+  heartbeat_min: 60          # 생존신호 주기(분, 0=끔) — 봇이 살아있는지 텔레그램으로 통지
+telegram:                    # 알림 — 체결·에러·차단·생존. 미설정이면 자동 no-op(끔)
+  enabled: false             # true + 토큰/챗ID 있어야 전송. 키는 환경변수 TELEGRAM_BOT_TOKEN/CHAT_ID 권장
+  bot_token: ''              # @BotFather 로 봇 생성 후 토큰
+  chat_id: ''                # 본인 챗 ID (@userinfobot 등으로 확인)
+  notify_trades: true        # 매수/매도 체결 알림
+  notify_errors: true        # 엔진 오류 알림

@@ -1,0 +1,36 @@
+# SuperPro 자동매매 — systemd 유닛 (라즈베리파이/리눅스 VPS용)
+# 정전·크래시·재부팅 시 자동 재시작. 봇 상태는 data/*.json 에 저장돼 이어서 동작.
+#
+# 설치:
+#   1) 경로/사용자 맞게 수정 (User, WorkingDirectory, ExecStart, EnvironmentFile)
+#   2) sudo cp deploy/superpro.service /etc/systemd/system/
+#   3) sudo systemctl daemon-reload && sudo systemctl enable --now superpro
+#   4) 확인:  systemctl status superpro   /   로그:  journalctl -u superpro -f
+#
+# ⚠️ 업비트=한국 IP 필요. 키는 EnvironmentFile(아래 /etc/superpro.env)에 둘 것(config.yaml 평문 금지).
+#    /etc/superpro.env 예:
+#      UPBIT_ACCESS_KEY=...
+#      UPBIT_SECRET_KEY=...
+#      ANTHROPIC_API_KEY=...
+#      TELEGRAM_BOT_TOKEN=...
+#      TELEGRAM_CHAT_ID=...
+
+[Unit]
+Description=SuperPro 자동매매 (코어+새틀 통합)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/SuperPro
+EnvironmentFile=-/etc/superpro.env
+ExecStart=/usr/bin/python3 /home/pi/SuperPro/run_all.py
+Restart=always
+RestartSec=10
+# 크래시 폭주 방지: 5분 내 5회 넘게 죽으면 정지(원인 점검 유도)
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

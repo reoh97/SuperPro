@@ -44,6 +44,7 @@ class LiveTrader:
         self.news = news
         self.state_path = state_path
         self.broker = broker        # None=모의 회계 / LedgerBroker=단일계정 실주문(자기 장부 기준)
+        self._halt = False          # 차단기 작동 시 True → 신규 진입(분할/불타기/그리드 포함) 차단
 
         pcfg = cfg.get("portfolio", {})
         # 동적 셀렉터: 유니버스 전체를 들고 상태관리하되, '신규 진입'은 상위 top_k(active)만 허용.
@@ -414,7 +415,12 @@ class LiveTrader:
     def _tranche_krw(self) -> float:
         return self.per_coin / self.n_tranche
 
+    def set_halt(self, halted: bool):
+        self._halt = bool(halted)
+
     def _buy(self, tk: str, price: float, sig, add: bool, size_mult: float = 1.0):
+        if self._halt:               # 차단기: 신규 진입·분할·불타기 모두 차단
+            return
         c = self.coins[tk]
         spend = min(self._tranche_krw() * size_mult, c["cash"])
         if spend <= 0 or price <= 0:
@@ -476,6 +482,8 @@ class LiveTrader:
         return self.per_coin / max(self.grid_levels, 1)
 
     def _grid_buy(self, tk: str, c: dict, price: float, size_mult: float = 1.0):
+        if self._halt:               # 차단기: 그리드 신규 매수 차단
+            return
         spend = min(self._grid_unit_krw() * size_mult, c["cash"])
         if spend <= 0 or price <= 0:
             return

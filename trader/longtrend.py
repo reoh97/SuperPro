@@ -50,6 +50,7 @@ class LongTrendTrader:
         self.unit = int(lt.get("unit", 1))             # 1=일봉
         self.state_path = state_path
         self.broker = broker        # None=모의 회계 / LedgerBroker=단일계정 실주문(자기 장부 기준)
+        self._halt = False          # 차단기 작동 시 True → 신규 진입만 차단(청산은 계속)
 
         self.coins: Dict[str, dict] = {}
         self._thread: Optional[threading.Thread] = None
@@ -153,7 +154,12 @@ class LongTrendTrader:
         if price > float(ma.iloc[i]) and price >= float(dhi.iloc[i]):
             self._buy(tk, price)
 
+    def set_halt(self, halted: bool):
+        self._halt = bool(halted)
+
     def _buy(self, tk: str, price: float):
+        if self._halt:               # 차단기: 신규 진입 차단
+            return
         c = self.coins[tk]
         spend = c["cash"]
         if spend < 5000 or price <= 0:

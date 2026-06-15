@@ -36,8 +36,8 @@ def _atr(df, n=14):
     return tr.ewm(alpha=1 / n, adjust=False).mean()
 
 
-def core_curve(df, lt) -> pd.Series:
-    """일봉 추세추종 → 날짜 인덱스 평가배수(1.0 시작) 시계열."""
+def core_curve(df, lt, slip=0.0) -> pd.Series:
+    """일봉 추세추종 → 날짜 인덱스 평가배수(1.0 시작) 시계열. slip=편도 슬리피지."""
     entry_n, exit_n = lt["entry_n"], lt["exit_n"]
     atr_k, ma_n = lt["atr_k"], lt["ma_n"]
     c = df["close"].to_numpy(float); h = df["high"].to_numpy(float)
@@ -52,9 +52,10 @@ def core_curve(df, lt) -> pd.Series:
             pos["peak"] = max(pos["peak"], h[i])
             stop = pos["peak"] - atr_k * a[i]
             if c[i] <= dlo[i] or c[i] <= stop:
-                eq *= (c[i] / pos["entry"]) * (1 - FEE); pos = None
+                eq *= (c[i] * (1 - slip) / pos["entry"]) * (1 - FEE)   # 매도 슬리피지
+                pos = None
         elif c[i] > ma[i] and c[i] >= dhi[i]:
-            pos = {"entry": c[i] * (1 + FEE), "peak": h[i]}
+            pos = {"entry": c[i] * (1 + FEE) * (1 + slip), "peak": h[i]}  # 매수 슬리피지
         cur = eq * (c[i] / pos["entry"]) if pos else eq
         out_i.append(idx[i]); out_v.append(cur)
     return pd.Series(out_v, index=pd.DatetimeIndex(out_i))

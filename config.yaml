@@ -200,6 +200,20 @@ longterm:                    # 중장기 추세추종 엔진(일봉) — 단타�
   - KRW-LINK
   - KRW-AVAX
   - KRW-DOT
+slippage:                    # 백테스트 현실화 — 편도 슬리피지(매수 +비싸게/매도 -싸게). 유동성↑=작게
+  enabled: true              # 호가창 두께·체결지연 추정치. 실거래 비용 = 수수료 + 이 슬리피지
+  default_pct: 0.0015        # 미지정 코인 기본(편도 0.15%)
+  by_coin:                   # 코인별 편도 슬리피지(메이저=얇게, 소형알트=두껍게)
+    KRW-BTC: 0.0005
+    KRW-ETH: 0.0005
+    KRW-XRP: 0.0008
+    KRW-SOL: 0.0008
+    KRW-ADA: 0.0010
+    KRW-DOGE: 0.0010
+    KRW-TRX: 0.0012
+    KRW-LINK: 0.0012
+    KRW-AVAX: 0.0015
+    KRW-DOT: 0.0015
 paper:
   initial_krw: 1000000
 upbit:

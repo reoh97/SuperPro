@@ -78,7 +78,8 @@ class Result:
     bars: int = 0
 
 
-def run(df: pd.DataFrame, cfg: dict) -> Result:
+def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0) -> Result:
+    """slip: 편도 슬리피지(예: 0.001=0.1%). 매수는 +slip 비싸게, 매도는 -slip 싸게 체결."""
     fee = float(cfg["trade"]["fee"])
     invest_ratio = float(cfg["trade"]["invest_ratio"])
     scfg = cfg.get("scalp", {})
@@ -137,6 +138,7 @@ def run(df: pd.DataFrame, cfg: dict) -> Result:
                     exit_price, exit_reason = row["close"], "timeout"
 
             if exit_price is not None:
+                exit_price *= (1 - slip)              # 슬리피지: 매도는 더 싸게 체결
                 proceeds = exit_price * pos["size"]
                 exit_fee = proceeds * fee
                 equity += proceeds - exit_fee
@@ -156,7 +158,7 @@ def run(df: pd.DataFrame, cfg: dict) -> Result:
         sig = strategies.evaluate(prev, row, confirmed, cfg, fee)
         if sig.should_enter:
             spend = equity * invest_ratio
-            entry_price = float(row["close"])
+            entry_price = float(row["close"]) * (1 + slip)   # 슬리피지: 매수는 더 비싸게 체결
             entry_fee = spend * fee
             size = (spend - entry_fee) / entry_price
             equity -= spend
@@ -174,7 +176,7 @@ def run(df: pd.DataFrame, cfg: dict) -> Result:
     # 종료 시 미청산 포지션은 마지막 종가로 평가
     if pos is not None:
         last = rows.iloc[-1]
-        proceeds = float(last["close"]) * pos["size"]
+        proceeds = float(last["close"]) * (1 - slip) * pos["size"]   # 슬리피지 반영
         exit_fee = proceeds * fee
         equity += proceeds - exit_fee
         res.fees_paid += exit_fee

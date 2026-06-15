@@ -78,8 +78,12 @@ class Result:
     bars: int = 0
 
 
-def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0) -> Result:
-    """slip: 편도 슬리피지(예: 0.001=0.1%). 매수는 +slip 비싸게, 매도는 -slip 싸게 체결."""
+def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0,
+        exec_mode: str = "market", limit_ttl: int = 2) -> Result:
+    """slip: 편도 슬리피지(0.001=0.1%, 시장가 체결에 적용).
+    exec_mode: 'market'(시장가, 매수+매도 슬리피지 맞음) |
+               'limit'(지정가: 진입·TP는 슬리피지 0이나 미체결 가능, SL/트레일/타임아웃은 시장가).
+    limit_ttl: 지정가 대기 봉수(이 안에 가격이 안 닿으면 미체결 만료=놓침)."""
     fee = float(cfg["trade"]["fee"])
     invest_ratio = float(cfg["trade"]["invest_ratio"])
     scfg = cfg.get("scalp", {})
@@ -91,6 +95,23 @@ def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0) -> Result:
     res = Result(start_equity=equity)
 
     pos = None  # 보유 포지션 dict
+    pending = None  # 지정가 대기주문(exec_mode="limit"): {"price","sig","reg","age"}
+
+    def _open(entry_price, sig, reg, t):
+        nonlocal equity, pos
+        spend = equity * invest_ratio
+        entry_fee = spend * fee
+        size = (spend - entry_fee) / entry_price
+        equity -= spend
+        res.fees_paid += entry_fee
+        pos = {
+            "entry": entry_price, "size": size, "exit_mode": sig.exit_mode,
+            "tp_price": entry_price * (1 + sig.tp_pct),
+            "sl_price": entry_price * (1 - sig.sl_pct),
+            "trail_pct": sig.trail_pct, "peak": entry_price,
+            "regime": reg, "reason": sig.reason,
+            "entry_time": t, "entry_fee": entry_fee, "bars_held": 0,
+        }
 
     rows = d.reset_index()
     time_col = rows.columns[0]
@@ -138,7 +159,9 @@ def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0) -> Result:
                     exit_price, exit_reason = row["close"], "timeout"
 
             if exit_price is not None:
-                exit_price *= (1 - slip)              # 슬리피지: 매도는 더 싸게 체결
+                # 지정가 모드: TP는 메이커 체결(슬리피지 0). SL·트레일·타임아웃은 시장가(슬리피지).
+                if not (exec_mode == "limit" and exit_reason == "tp"):
+                    exit_price *= (1 - slip)
                 proceeds = exit_price * pos["size"]
                 exit_fee = proceeds * fee
                 equity += proceeds - exit_fee
@@ -154,24 +177,28 @@ def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0) -> Result:
                 pos = None
             continue
 
-        # 미보유 → 확정 국면 기준 진입 신호
-        sig = strategies.evaluate(prev, row, confirmed, cfg, fee)
-        if sig.should_enter:
-            spend = equity * invest_ratio
-            entry_price = float(row["close"]) * (1 + slip)   # 슬리피지: 매수는 더 비싸게 체결
-            entry_fee = spend * fee
-            size = (spend - entry_fee) / entry_price
-            equity -= spend
-            res.fees_paid += entry_fee
-            pos = {
-                "entry": entry_price, "size": size,
-                "exit_mode": sig.exit_mode,
-                "tp_price": entry_price * (1 + sig.tp_pct),
-                "sl_price": entry_price * (1 - sig.sl_pct),
-                "trail_pct": sig.trail_pct, "peak": entry_price,
-                "regime": confirmed, "reason": sig.reason,
-                "entry_time": t, "entry_fee": entry_fee, "bars_held": 0,
-            }
+        # 미보유 → 진입
+        if exec_mode == "limit":
+            # 1) 대기 지정가 체결 시도: 가격이 지정가 이하로 내려오면 체결(슬리피지 0)
+            if pending is not None:
+                pending["age"] += 1
+                if row["low"] <= pending["price"]:
+                    _open(pending["price"], pending["sig"], pending["reg"], t)
+                    pending = None
+                elif pending["age"] >= limit_ttl:
+                    pending = None               # 미체결 만료(가격이 안 닿음=놓침)
+            if pos is not None:
+                continue
+            # 2) 새 신호 → 다음 봉부터 체결될 지정가 예약(즉시 체결 아님)
+            sig = strategies.evaluate(prev, row, confirmed, cfg, fee)
+            if sig.should_enter and pending is None:
+                pending = {"price": float(row["close"]), "sig": sig,
+                           "reg": confirmed, "age": 0}
+        else:
+            # 시장가: 즉시 체결(매수 슬리피지 반영)
+            sig = strategies.evaluate(prev, row, confirmed, cfg, fee)
+            if sig.should_enter:
+                _open(float(row["close"]) * (1 + slip), sig, confirmed, t)
 
     # 종료 시 미청산 포지션은 마지막 종가로 평가
     if pos is not None:

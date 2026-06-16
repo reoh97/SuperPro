@@ -85,29 +85,26 @@ def main():
     start = pd.Timestamp(a[0]) if len(a) > 0 else pd.Timestamp("2025-01-01")
     end = pd.Timestamp(a[1]) if len(a) > 1 else pd.Timestamp("2026-12-31")
     cfg = yaml.safe_load(open(os.path.join(BASE, "config.yaml"), encoding="utf-8"))
-    lt = cfg["longterm"]; ov = lt.get("per_coin_overrides", {})
-    maj_cap = sum(ov.get(t, lt["per_coin_krw"]) for t in MAJORS)
-    altc_cap = sum(ov.get(t, lt["per_coin_krw"]) for t in ALTS)
+    core_tks = cfg["longterm"]["tickers"]          # V2.1: 메이저4
+    sat_tks = cfg["selector"]["universe"]          # 알트6
 
-    mr, mmdd, mmo, mon = core_period(cfg, MAJORS, start, end)
-    ar, amdd, amo, _ = core_period(cfg, ALTS, start, end)
-    bhr, bhmdd = bh_period(MAJORS + ALTS, start, end)
+    cr, cmdd, cmo, mon = core_period(cfg, core_tks, start, end)
+    # 참고: 알트를 코어가 거래했다면(구식)? — 비교용
+    ar, amdd, amo, _ = core_period(cfg, sat_tks, start, end)
+    bhr, bhmdd = bh_period(core_tks + sat_tks, start, end)
 
     print("=" * 76)
     print(f"  기간 백테스트  {start.date()} ~ {end.date()}  ({mon:.1f}개월, 현실 슬리피지)")
+    print(f"  V2.1: 코어=메이저{len(core_tks)}(추세) / 새틀=알트{len(sat_tks)}(평균회귀)")
     print("=" * 76)
-    print(f"\n  [코어 — 일봉 실엔진, 2,000만 기준]")
-    print(f"  {'슬리브':<14}{'구간수익':>10}{'월환산':>9}{'MDD':>7}")
-    print(f"  🪨 메이저4      {mr*100:>+9.1f}%{mmo*100:>+8.2f}%{mmdd*100:>6.0f}%")
-    print(f"  🪨 알트6        {ar*100:>+9.1f}%{amo*100:>+8.2f}%{amdd*100:>6.0f}%")
-    # 코어 합산(자본가중: 메이저800만 + 알트702만)
-    core_ret = (maj_cap * mr + altc_cap * ar) / (maj_cap + altc_cap)
-    core_mo = (1 + core_ret) ** (1 / mon) - 1 if mon > 0 else 0
-    print(f"  ⚖ 코어 합산     {core_ret*100:>+9.1f}%{core_mo*100:>+8.2f}%{'':>7}  (메이저+알트 자본가중)")
+    print(f"\n  [코어 — 메이저{len(core_tks)} 일봉 실엔진, 75%]")
+    print(f"  {'':<14}{'구간수익':>10}{'월환산':>9}{'MDD':>7}")
+    print(f"  🪨 코어(메이저)  {cr*100:>+9.1f}%{cmo*100:>+8.2f}%{cmdd*100:>6.0f}%")
     print(f"  📉 그냥보유10    {bhr*100:>+9.1f}%{'':>9}{bhmdd*100:>6.0f}%   ← 시장 맥락")
+    print(f"  (참고) 알트를 코어가 거래했다면: {ar*100:+.1f}% (MDD {amdd*100:.0f}%) "
+          f"← {'메이저만이 나음' if cr > ar else '알트포함이 나음'}")
+    core_ret, core_mo = cr, cmo
 
-    # 코어가 총자본의 75% → 합산 시스템 근사(새틀 25%는 해당구간 15분봉 있는 국면만)
-    sys75 = core_ret * 0.75   # 새틀(25%) 미반영분은 아래 별도
     print(f"\n  [새틀 — 15분봉 있는 구간만(알트, 지정가 vs 시장가)]")
     found = False
     for rk in ("bull", "sideways", "bear"):

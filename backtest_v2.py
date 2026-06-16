@@ -73,40 +73,38 @@ def sat_annual(cfg, tickers, mult, exec_mode):
 def main():
     cfg = yaml.safe_load(open(os.path.join(BASE, "config.yaml"), encoding="utf-8"))
     lt = cfg["longterm"]; ov = lt.get("per_coin_overrides", {})
-    # 자본 배분(원)
-    maj_cap = sum(ov.get(t, lt["per_coin_krw"]) for t in MAJORS)        # 800만
-    altc_cap = sum(ov.get(t, lt["per_coin_krw"]) for t in ALTS)          # 702만
-    sats_cap = cfg["portfolio"]["per_coin_krw"] * len(ALTS)              # 498만
+    core_tks = lt["tickers"]                          # V2.1: 메이저4
+    sat_tks = cfg["selector"]["universe"]             # 알트6
+    core_cap = sum(ov.get(t, lt["per_coin_krw"]) for t in core_tks)
+    sat_cap = cfg["portfolio"]["per_coin_krw"] * len(sat_tks)
 
     print("=" * 74)
-    print("  V2 보완구조 백테스트 (현실 슬리피지, 코인당 200만 · 총 2,000만)")
+    print(f"  V2.1 보완구조 백테스트 (현실 슬리피지 · 총 {CAP:,}원)")
+    print(f"  코어=메이저{len(core_tks)} (추세) / 새틀=알트{len(sat_tks)} (평균회귀·지정가)")
     print("=" * 74)
-    maj_ann, maj_mdd = core_annual(cfg, MAJORS)
-    altc_ann, altc_mdd = core_annual(cfg, ALTS)
-    sat_lim = sat_annual(cfg, ALTS, 1.0, "limit")
-    sat_mkt = sat_annual(cfg, ALTS, 1.0, "market")
+    core_ann, core_mdd = core_annual(cfg, core_tks)
+    sat_lim = sat_annual(cfg, sat_tks, 1.0, "limit")
+    sat_mkt = sat_annual(cfg, sat_tks, 1.0, "market")
 
     print(f"\n  [슬리브별 연율]  (자본비중)")
-    print(f"  🪨 코어·메이저4  {maj_ann*100:>+7.1f}%  (MDD {maj_mdd*100:.0f}%, {maj_cap/CAP*100:.0f}%={maj_cap:,}원)")
-    print(f"  🪨 코어·알트6    {altc_ann*100:>+7.1f}%  (MDD {altc_mdd*100:.0f}%, {altc_cap/CAP*100:.0f}%={altc_cap:,}원)")
-    print(f"  🛰 새틀·알트6    지정가 {sat_lim*100:>+6.1f}% / 시장가 {sat_mkt*100:+.1f}%  "
-          f"({sats_cap/CAP*100:.0f}%={sats_cap:,}원)")
+    print(f"  🪨 코어·메이저{len(core_tks)}  {core_ann*100:>+7.1f}%  (MDD {core_mdd*100:.0f}%, "
+          f"{core_cap/CAP*100:.0f}%={core_cap:,}원)")
+    print(f"  🛰 새틀·알트{len(sat_tks)}    지정가 {sat_lim*100:>+6.1f}% / 시장가 {sat_mkt*100:+.1f}%  "
+          f"({sat_cap/CAP*100:.0f}%={sat_cap:,}원)")
 
     def combine(sat_ann):
-        ann = (maj_cap * maj_ann + altc_cap * altc_ann + sats_cap * sat_ann) / CAP
-        mo = (1 + ann) ** (1 / 12) - 1
-        return ann, mo
+        ann = (core_cap * core_ann + sat_cap * sat_ann) / CAP
+        return ann, (1 + ann) ** (1 / 12) - 1
     ann_l, mo_l = combine(sat_lim)
     ann_m, mo_m = combine(sat_mkt)
 
-    print(f"\n  [합산 V2 — 자본가중]")
+    print(f"\n  [합산 V2.1 — 자본가중]")
     print(f"  {'체결방식':<14}{'연율':>9}{'월':>9}{'월 금액(2천만)':>16}")
     print(f"  {'지정가(V2)':<13}{ann_l*100:>+8.1f}%{mo_l*100:>+8.2f}%{mo_l*CAP:>+14,.0f}원")
     print(f"  {'시장가(비교)':<12}{ann_m*100:>+8.1f}%{mo_m*100:>+8.2f}%{mo_m*CAP:>+14,.0f}원")
     print(f"\n  [지정가 효과] 합산 월수익 {mo_m*100:+.2f}% → {mo_l*100:+.2f}% "
           f"(+{(mo_l-mo_m)*CAP:,.0f}원/월) — 새틀 슬리피지 회피분")
     print(f"  ※ 코어=일봉3년 실엔진(정확). 새틀=국면1구간·AI게이트제외(보수적)·지정가체결 다소 낙관.")
-    print(f"    실거래 전 소액·모의 관찰 필수. 과거≠미래.")
 
 
 if __name__ == "__main__":

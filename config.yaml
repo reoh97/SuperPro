@@ -9,8 +9,15 @@ trade:
   min_order_krw: 5000
 loop:
   interval_sec: 10
+market_gate:                 # ★ 차트 시장게이트(AI 대체, 검증가능·공짜) — 새틀 약세장 정지
+  enabled: true              # BTC 200일선+기울기로 약세 감지 → 새틀 신규진입 전면 차단
+  ticker: KRW-BTC            # 시장 대표(BTC가 시장 방향을 끌음)
+  ma_n: 200                  # 200일선
+  slope_n: 20                # 기울기 측정 구간(일). 종가<200MA AND 200MA 20일전보다 하락 = 약세
+  interval_sec: 3600         # 1시간마다 BTC 일봉 체크(일봉이라 충분)
+                             #   검증: 약세만 정확히 정지(횡보는 살림) → 새틀 +13.9%→+18.6%
 ai:
-  enabled: true
+  enabled: false             # ★ AI 게이트 OFF — 차트 시장게이트(위)로 대체(백테스트 가능·비용0).
   model: claude-haiku-4-5
   min_confidence: 60
   min_interval_sec: 900

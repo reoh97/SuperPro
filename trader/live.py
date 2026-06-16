@@ -138,6 +138,17 @@ class LiveTrader:
         self._ai_at: Optional[str] = None
         self._last_ai_ts: float = 0.0
 
+        # 차트 시장게이트(AI 대체) — BTC 200일선+기울기로 약세 감지 → 신규진입 차단
+        mg = cfg.get("market_gate", {})
+        self.mkt_gate_on = bool(mg.get("enabled", False))
+        self.mkt_ticker = mg.get("ticker", "KRW-BTC")
+        self.mkt_ma_n = int(mg.get("ma_n", 200))
+        self.mkt_slope_n = int(mg.get("slope_n", 20))
+        self.mkt_interval = float(mg.get("interval_sec", 3600))
+        self._mkt_bear = False            # True=약세(BTC<200MA & 200MA하락중) → 새틀 정지
+        self._mkt_at: Optional[str] = None
+        self._last_mkt_ts: float = 0.0
+
         self._load()
 
     # ---------- 상태 영속화 ----------
@@ -197,6 +208,7 @@ class LiveTrader:
         interval = max(float(self.cfg["loop"]["interval_sec"]), 5)
         while not self._stop.is_set():
             try:
+                self._refresh_market_gate()
                 self._refresh_ai_regime()
                 self._refresh_selection()
                 for tk in self.tickers:
@@ -234,6 +246,31 @@ class LiveTrader:
             self.active = set(picks)
         self._last_sel_ts = now
 
+    # ---------- 차트 시장게이트 (AI 대체, 검증가능) ----------
+    def _refresh_market_gate(self):
+        """BTC 일봉 200일선+기울기로 시장 약세 판정 → self._mkt_bear.
+        약세 = 종가 < 200일선 AND 200일선 하락중(slope<0). 검증: 새틀 +13.9%→+18.6%(약세 정지)."""
+        if not self.mkt_gate_on:
+            return
+        now = time.time()
+        if self._mkt_at is not None and (now - self._last_mkt_ts) < self.mkt_interval:
+            return
+        try:
+            df = pyupbit.get_ohlcv(self.mkt_ticker, interval="day",
+                                   count=self.mkt_ma_n + self.mkt_slope_n + 10)
+        except Exception:
+            return
+        if df is None or len(df) < self.mkt_ma_n + self.mkt_slope_n:
+            return
+        ma = df["close"].rolling(self.mkt_ma_n).mean()
+        price = float(df["close"].iloc[-1])
+        slope = float(ma.iloc[-1] - ma.iloc[-1 - self.mkt_slope_n])
+        bear = (price < float(ma.iloc[-1])) and (slope < 0)   # 200일선 아래 + 하락중
+        with self._lock:
+            self._mkt_bear = bear
+            self._mkt_at = _now()
+        self._last_mkt_ts = now
+
     # ---------- AI 시장국면 ----------
     def _refresh_ai_regime(self):
         if self.advisor is None or not self.advisor.enabled:
@@ -263,6 +300,9 @@ class LiveTrader:
         - 그 외/AI없음/오류     → 전체 허용(fail-open)
         """
         ALL = {regime.UP, regime.SIDEWAYS, regime.DOWN}
+        # 차트 시장게이트: 약세장(BTC<200MA & 하락중)이면 신규진입 전면 차단(검증된 새틀 약세정지)
+        if self.mkt_gate_on and self._mkt_bear:
+            return False, set(), 1.0
         v = self._ai_view
         if v is None or v.regime == "ERROR":
             return True, ALL, 1.0
@@ -648,7 +688,8 @@ class LiveTrader:
         v = self._ai_view
         allowed, regs, mult = self._entry_policy()
         tier = self._bull_tier()
-        gate = ("현금보존(신규 중단)" if not allowed
+        gate = ("🔴 약세장 정지(차트게이트: BTC 200일선 아래·하락중)" if (self.mkt_gate_on and self._mkt_bear)
+                else "현금보존(신규 중단)" if not allowed
                 else "🔥 상승장 공격모드(강함: 추세추종 강화)" if tier == "strong"
                 else "⚡ 상승장 중도모드(적당: 선별진입+추세)" if tier == "moderate"
                 else f"약세장 방어(박스+반등, UP차단 ×{mult:g})" if regime.UP not in regs

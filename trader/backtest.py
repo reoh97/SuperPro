@@ -179,7 +179,7 @@ def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0,
                 ))
                 pos = None
             # 분할매수: 보유 중 직전매수가 -add_drop 추가하락 시 1트랜치 더(평균단가↓), n_tranche까지
-            elif avg_down and pos["exit_mode"] != "trail" and pos["tranches"] < n_tranche \
+            elif avg_down and pos["tranches"] < n_tranche \
                     and row["low"] <= pos["last_entry"] * (1 - add_drop):
                 add_px = pos["last_entry"] * (1 - add_drop)          # 그 레벨 지정가 추가매수
                 if exec_mode != "limit":

@@ -47,7 +47,8 @@ def main():
 
     print("=" * 60)
     print("  중장기 추세추종 엔진 (일봉 돈키언) — 모의")
-    print(f"  종목 {len(engine.tickers)}개 · 종목당 {engine.per_coin:,.0f}원 · "
+    total = sum(engine._per_coin(tk) for tk in engine.tickers)
+    print(f"  종목 {len(engine.tickers)}개 · 총 {total:,.0f}원(종목별 차등) · "
           f"{engine.entry_n}일돌파/{engine.exit_n}일청산")
     print("  Ctrl+C 로 종료")
     print("=" * 60)

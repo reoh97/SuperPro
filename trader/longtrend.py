@@ -41,6 +41,7 @@ class LongTrendTrader:
         pcfg = cfg.get("portfolio", {})
         self.tickers: List[str] = list(lt.get("tickers", pcfg.get("tickers", ["KRW-BTC"])))
         self.per_coin = float(lt.get("per_coin_krw", 1_200_000))
+        self.per_coin_overrides = lt.get("per_coin_overrides", {}) or {}   # 종목별 차등 예산(메이저↑)
         self.entry_n = int(lt.get("entry_n", 50))      # 돌파 고점 구간(일)
         self.exit_n = int(lt.get("exit_n", 20))        # 청산 저점 구간(일)
         self.atr_k = float(lt.get("atr_k", 3.0))       # 샹들리에 ATR 배수
@@ -61,8 +62,11 @@ class LongTrendTrader:
         self._last_error: Optional[str] = None
         self._load()
 
-    def _fresh(self) -> dict:
-        return {"cash": self.per_coin, "realized_pnl": 0.0, "position": None,
+    def _per_coin(self, tk: str) -> float:
+        return float(self.per_coin_overrides.get(tk, self.per_coin))
+
+    def _fresh(self, tk: str) -> dict:
+        return {"cash": self._per_coin(tk), "realized_pnl": 0.0, "position": None,
                 "trades": [], "last_date": None, "price": None}
 
     def _load(self):
@@ -74,7 +78,7 @@ class LongTrendTrader:
             except Exception:
                 data = {}
         for tk in self.tickers:
-            self.coins[tk] = {**self._fresh(), **data.get(tk, {})}
+            self.coins[tk] = {**self._fresh(tk), **data.get(tk, {})}
 
     def _save(self):
         os.makedirs(os.path.dirname(self.state_path) or ".", exist_ok=True)
@@ -208,7 +212,7 @@ class LongTrendTrader:
             held = pos["size"] * (c["price"] or pos["entry"]) if pos else 0.0
             eq = c["cash"] + held
             tot_eq += eq
-            tot_base += self.per_coin
+            tot_base += self._per_coin(tk)
             coins.append({
                 "ticker": tk, "price": c["price"], "holding": pos is not None,
                 "avg": pos["entry"] if pos else None,

@@ -153,8 +153,9 @@ def main():
     app = create_combined_app(satellite, core)
     print("=" * 64)
     print(f"  SuperPro 통합 대시보드  ({'실거래' if mode=='live' else '모의'} 모드)")
-    print(f"  🛰 새틀 {satellite.per_coin:,.0f}원/종목 ×{len(satellite.tickers)}  "
-          f"|  🪨 코어 {core.per_coin:,.0f}원/종목 ×{len(core.tickers)}"
+    core_total = sum(core._per_coin(tk) for tk in core.tickers)
+    print(f"  🛰 새틀 {satellite.per_coin:,.0f}원×{len(satellite.tickers)}알트={satellite.per_coin*len(satellite.tickers):,.0f}  "
+          f"|  🪨 코어 {core_total:,.0f}(메이저200만/알트117만)"
           f"{'' if core_enabled else '  (longterm.enabled=false — 코어 매매 비활성)'}")
     if mode == "live":
         print("  ⚠️ 실거래: 같은 계정 공유. reconcile.py 로 정합성 점검 권장. 출금권한 금지.")

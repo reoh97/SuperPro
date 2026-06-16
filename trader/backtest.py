@@ -79,13 +79,15 @@ class Result:
 
 
 def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0,
-        exec_mode: str = "market", limit_ttl: int = 2) -> Result:
-    """slip: 편도 슬리피지(0.001=0.1%, 시장가 체결에 적용).
-    exec_mode: 'market'(시장가, 매수+매도 슬리피지 맞음) |
-               'limit'(지정가: 진입·TP는 슬리피지 0이나 미체결 가능, SL/트레일/타임아웃은 시장가).
-    limit_ttl: 지정가 대기 봉수(이 안에 가격이 안 닿으면 미체결 만료=놓침)."""
+        exec_mode: str = "market", limit_ttl: int = 2, avg_down: bool = False) -> Result:
+    """slip: 편도 슬리피지. exec_mode: market|limit.
+    avg_down: True면 보유 중 직전매수가 -add_drop 하락 시 1트랜치씩 추가매수(평균단가↓, n_tranche까지).
+              라이브 분할매수와 동일. invest_ratio=1트랜치 크기로 쓸 것(예 0.25=4분할)."""
     fee = float(cfg["trade"]["fee"])
     invest_ratio = float(cfg["trade"]["invest_ratio"])
+    pcfg = cfg.get("portfolio", {})
+    n_tranche = int(pcfg.get("tranches", 4))
+    add_drop = float(pcfg.get("add_drop_pct", 0.02))
     scfg = cfg.get("scalp", {})
     max_hold = int(scfg.get("max_hold_bars", 60))
     warmup = int(cfg.get("indicators", {}).get("ema_slow", 200)) + 5
@@ -106,10 +108,11 @@ def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0,
         res.fees_paid += entry_fee
         pos = {
             "entry": entry_price, "size": size, "exit_mode": sig.exit_mode,
+            "tp_pct": sig.tp_pct, "sl_pct": sig.sl_pct,
             "tp_price": entry_price * (1 + sig.tp_pct),
             "sl_price": entry_price * (1 - sig.sl_pct),
             "trail_pct": sig.trail_pct, "peak": entry_price,
-            "regime": reg, "reason": sig.reason,
+            "regime": reg, "reason": sig.reason, "last_entry": entry_price, "tranches": 1,
             "entry_time": t, "entry_fee": entry_fee, "bars_held": 0,
         }
 
@@ -175,6 +178,25 @@ def run(df: pd.DataFrame, cfg: dict, slip: float = 0.0,
                     ret_pct=net / (cost + pos["entry_fee"]),
                 ))
                 pos = None
+            # 분할매수: 보유 중 직전매수가 -add_drop 추가하락 시 1트랜치 더(평균단가↓), n_tranche까지
+            elif avg_down and pos["exit_mode"] != "trail" and pos["tranches"] < n_tranche \
+                    and row["low"] <= pos["last_entry"] * (1 - add_drop):
+                add_px = pos["last_entry"] * (1 - add_drop)          # 그 레벨 지정가 추가매수
+                if exec_mode != "limit":
+                    add_px *= (1 + slip)
+                spend = equity * invest_ratio
+                add_fee = spend * fee
+                add_size = (spend - add_fee) / add_px
+                equity -= spend
+                res.fees_paid += add_fee
+                new_size = pos["size"] + add_size
+                pos["entry"] = (pos["entry"] * pos["size"] + add_px * add_size) / new_size  # 가중평균
+                pos["size"] = new_size
+                pos["entry_fee"] += add_fee
+                pos["last_entry"] = add_px
+                pos["tranches"] += 1
+                pos["tp_price"] = pos["entry"] * (1 + pos["tp_pct"])  # 평균단가 기준 재계산
+                pos["sl_price"] = pos["entry"] * (1 - pos["sl_pct"])
             continue
 
         # 미보유 → 진입

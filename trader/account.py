@@ -24,6 +24,7 @@ class Fill:
     volume: float     # 체결 수량(코인)
     fee: float        # 실제 지불 수수료(원)
     krw: float        # 매수=실제 차감된 원화(수수료 포함) / 매도=체결 총액(수수료 차감 전)
+    filled: bool = True   # 지정가 주문 체결 여부(check_order용). 시장가는 항상 True.
 
 
 class LedgerBroker:
@@ -117,6 +118,57 @@ class LedgerBroker:
             return float(p) if p else 0.0
         except Exception:
             return 0.0
+
+    # ---------- 지정가(limit) 주문 — V2 슬리피지 회피 ----------
+    def place_limit_buy(self, ticker: str, price: float, krw_amount: float) -> Optional[str]:
+        """price 지정가 매수 주문(미체결 가능). 체결 시 슬리피지 0. 주문 uuid 반환."""
+        if krw_amount < 5000 or price <= 0:
+            return None
+        volume = krw_amount / price
+        try:
+            resp = self.upbit.buy_limit_order(ticker, price, volume)
+        except Exception:
+            return None
+        if not resp or not isinstance(resp, dict) or resp.get("error"):
+            return None
+        return resp.get("uuid")
+
+    def place_limit_sell(self, ticker: str, price: float, volume: float) -> Optional[str]:
+        """price 지정가 매도 주문(자기 수량만). 주문 uuid 반환."""
+        if volume <= 0 or price <= 0:
+            return None
+        try:
+            resp = self.upbit.sell_limit_order(ticker, price, volume)
+        except Exception:
+            return None
+        if not resp or not isinstance(resp, dict) or resp.get("error"):
+            return None
+        return resp.get("uuid")
+
+    def check_order(self, uuid: str) -> Optional[Fill]:
+        """주문 상태 조회 → 완전체결이면 Fill(filled=True, 실체결), 아니면 filled=False."""
+        try:
+            order = self.upbit.get_order(uuid)
+        except Exception:
+            return None
+        if not order or not isinstance(order, dict):
+            return None
+        trades = order.get("trades") or []
+        if order.get("state") == "done" and trades:
+            vol = sum(float(t["volume"]) for t in trades)
+            funds = sum(float(t["funds"]) for t in trades)
+            paid = float(order.get("paid_fee", 0.0) or 0.0)
+            avg = funds / vol if vol > 0 else 0.0
+            krw = funds + paid if order.get("side") == "bid" else funds   # bid=매수
+            return Fill(price=avg, volume=vol, fee=paid, krw=krw, filled=True)
+        return Fill(price=0.0, volume=0.0, fee=0.0, krw=0.0, filled=False)  # 미체결/부분(완료 전)
+
+    def cancel_order(self, uuid: str) -> bool:
+        try:
+            self.upbit.cancel_order(uuid)
+            return True
+        except Exception:
+            return False
 
 
 # ============================ 정합성 검증(reconcile) ============================

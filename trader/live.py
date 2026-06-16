@@ -70,6 +70,8 @@ class LiveTrader:
         self.unit = int(cfg.get("timeframe_min", 15))
         scfg = cfg.get("scalp", {})
         self.confirm_bars = int(scfg.get("confirm_bars", 3))
+        self.exec_mode = str(scfg.get("exec_mode", "market"))      # V2: 'limit'=지정가 진입(슬리피지 회피)
+        self.limit_ttl = int(scfg.get("limit_ttl_bars", 2))        # 지정가 미체결 만료 봉수
         self.exit_on_down = bool(scfg.get("exit_on_down", True))   # DOWN전환 시 보유분 청산(V1)
         ucfg = scfg.get("uptrend", {})
         self.pyramid = bool(ucfg.get("pyramid", False))            # 상승장 불타기
@@ -142,7 +144,8 @@ class LiveTrader:
     def _fresh_coin(self) -> dict:
         return {"cash": self.per_coin, "realized_pnl": 0.0, "position": None,
                 "grid": [], "trades": [], "last_bar": None, "confirmed": regime.SIDEWAYS,
-                "streak_reg": None, "streak": 0, "price": None, "reg_raw": None}
+                "streak_reg": None, "streak": 0, "price": None, "reg_raw": None,
+                "pending": None}   # V2 지정가 대기주문
 
     def _load(self):
         data = {}
@@ -161,7 +164,7 @@ class LiveTrader:
         for tk, c in self.coins.items():
             dump[tk] = {"cash": c["cash"], "realized_pnl": c["realized_pnl"],
                         "position": c["position"], "grid": c.get("grid", []),
-                        "trades": c["trades"][-100:],
+                        "trades": c["trades"][-100:], "pending": c.get("pending"),
                         "last_bar": c["last_bar"], "confirmed": c["confirmed"],
                         "streak_reg": c["streak_reg"], "streak": c["streak"]}
         tmp = self.state_path + ".tmp"
@@ -322,6 +325,10 @@ class LiveTrader:
 
         confirmed = c["confirmed"]
         pos = c["position"]
+        # V2 지정가 대기주문 처리(체결/만료) — 미보유 시
+        if self.exec_mode == "limit" and c.get("pending") is not None and pos is None:
+            self._process_pending(tk, c, float(price), new_bar)
+            pos = c["position"]
         selected = tk in self.active                      # 동적 셀렉터: 신규 진입은 active 종목만
         tier = self._bull_tier()                          # 'strong' | 'moderate' | None
         if tier == "strong":
@@ -421,6 +428,71 @@ class LiveTrader:
     def _buy(self, tk: str, price: float, sig, add: bool, size_mult: float = 1.0):
         if self._halt:               # 차단기: 신규 진입·분할·불타기 모두 차단
             return
+        # V2 지정가: 신규 진입(add=False)은 지정가 예약(슬리피지 회피). 분할/불타기(add=True)는 즉시 시장가.
+        if self.exec_mode == "limit" and not add:
+            self._place_limit(tk, price, sig, size_mult)
+            return
+        self._fill_buy(tk, price, sig, add, size_mult)
+
+    # ---------- V2 지정가(limit) 진입 ----------
+    def _place_limit(self, tk: str, price: float, sig, size_mult: float = 1.0):
+        c = self.coins[tk]
+        if c.get("pending") is not None or c["position"] is not None:
+            return
+        spend = min(self._tranche_krw() * size_mult, c["cash"])
+        if spend <= 0 or price <= 0:
+            return
+        uuid = None
+        if self.broker is not None:                 # 라이브: 실제 지정가 주문
+            uuid = self.broker.place_limit_buy(tk, float(price), spend)
+            if not uuid:
+                return
+        c["pending"] = {"price": float(price), "krw": spend, "tp_pct": sig.tp_pct,
+                        "sl_pct": sig.sl_pct, "exit_mode": sig.exit_mode,
+                        "trail_pct": sig.trail_pct, "reason": sig.reason,
+                        "regime": c["confirmed"], "bars": 0, "uuid": uuid}
+
+    def _process_pending(self, tk: str, c: dict, price: float, new_bar: bool):
+        p = c["pending"]
+        if self._halt:                              # 차단기: 대기주문 취소(신규 노출 차단)
+            if self.broker is not None and p.get("uuid"):
+                self.broker.cancel_order(p["uuid"])
+            c["pending"] = None
+            return
+        if self.broker is not None and p.get("uuid"):   # 라이브: 실주문 체결 확인
+            f = self.broker.check_order(p["uuid"])
+            if f is not None and getattr(f, "filled", False):
+                self._open_from_pending(tk, c, f.price, f.volume, f.fee, f.krw, p)
+                c["pending"] = None
+                return
+        elif price <= p["price"]:                   # 모의: 가격이 지정가 이하로 닿으면 체결(슬리피지 0)
+            fee = p["krw"] * self.fee
+            vol = (p["krw"] - fee) / p["price"]
+            self._open_from_pending(tk, c, p["price"], vol, fee, p["krw"], p)
+            c["pending"] = None
+            return
+        if new_bar:                                 # 미체결 만료(TTL) → 취소
+            p["bars"] += 1
+            if p["bars"] >= self.limit_ttl:
+                if self.broker is not None and p.get("uuid"):
+                    self.broker.cancel_order(p["uuid"])
+                c["pending"] = None
+
+    def _open_from_pending(self, tk: str, c: dict, fill_price: float, vol: float,
+                           fee: float, spend: float, p: dict):
+        c["cash"] -= spend
+        c["position"] = {
+            "size": vol, "cost": spend - fee, "fees": fee, "used": 1,
+            "last_entry": fill_price, "entry_time": _now(), "bars_held": 0,
+            "regime": p["regime"], "exit_mode": p["exit_mode"],
+            "tp_pct": p["tp_pct"], "trail_pct": p["trail_pct"],
+            "sl_price": fill_price * (1 - p["sl_pct"]), "peak": fill_price,
+        }
+        c["trades"].append({"time": _now(), "side": "buy", "price": fill_price,
+                            "volume": vol, "amount": spend, "fee": fee,
+                            "reason": (p["reason"] or "") + " [지정가]"})
+
+    def _fill_buy(self, tk: str, price: float, sig, add: bool, size_mult: float = 1.0):
         c = self.coins[tk]
         spend = min(self._tranche_krw() * size_mult, c["cash"])
         if spend <= 0 or price <= 0:

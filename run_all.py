@@ -21,10 +21,12 @@ import uvicorn
 import yaml
 
 from trader.ai_advisor import AIAdvisor
+from trader.capitulation import CapitulationTrader
 from trader.live import LiveTrader
 from trader.longtrend import LongTrendTrader
 from trader.news import NewsFeed
 from trader.safety import Notifier, RiskGuard
+from trader.skim import ProfitSkim
 from web.app import create_combined_app
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -49,39 +51,38 @@ def load_dotenv(path: str) -> None:
                 os.environ[key] = val
 
 
-def _start_monitor(satellite, core, guard, notifier, cfg, mode):
-    """감시 스레드: 합산자산→차단기, 새 체결·에러 알림, 생존신호(heartbeat)."""
+def _start_monitor(satellite, core, capit, guard, skim, notifier, cfg, mode):
+    """감시 스레드: 합산자산→차단기·적립, 새 체결·에러 알림, 생존신호(heartbeat)."""
     poll = max(int(cfg.get("safety", {}).get("poll_sec", 30)), 10)
     hb_min = float(cfg.get("safety", {}).get("heartbeat_min", 60))
     state = {"seen_trade": "", "last_err": "", "last_hb": 0.0}
 
     def equity_of():
-        s = satellite.snapshot(); c = core.status()
-        return (s["total"]["equity"], c["total_equity"],
-                s["total"]["equity"] + c["total_equity"], s, c)
+        s = satellite.snapshot(); c = core.status(); p = capit.status()
+        tot = s["total"]["equity"] + c["total_equity"] + p["total_equity"]
+        return s, c, p, tot
 
-    def collect_trades(snap_sat, snap_core):
+    def collect_trades(*snaps):
         rows = []
-        for c in snap_sat.get("coins", []):
-            for t in (c.get("recent_trades") or []):
-                rows.append((t.get("time", ""), c["ticker"], t))
-        for c in snap_core.get("coins", []):
-            for t in (c.get("recent_trades") or []):
-                rows.append((t.get("time", ""), c["ticker"], t))
+        for snap in snaps:
+            for c in snap.get("coins", []):
+                for t in (c.get("recent_trades") or []):
+                    rows.append((t.get("time", ""), c["ticker"], t))
         return sorted(rows)
 
     def loop():
         notifier.send(f"🤖 <b>SuperPro 가동</b> ({'실거래' if mode=='live' else '모의'}) — "
-                      f"코어+새틀 감시 시작. 차단기 낙폭 -{guard.max_dd*100:.0f}%/일일 -{guard.max_daily*100:.0f}%")
+                      f"코어+새틀+폭락 감시. 차단기 낙폭 -{guard.max_dd*100:.0f}%/일일 -{guard.max_daily*100:.0f}%")
         while True:
             try:
-                eq_s, eq_c, eq_tot, snap_s, snap_c = equity_of()
-                # 1) 차단기
+                snap_s, snap_c, snap_p, eq_tot = equity_of()
+                # 1) 차단기 + 적립(고점 50%)
                 halted = guard.update(eq_tot)
-                satellite.set_halt(halted); core.set_halt(halted)
+                satellite.set_halt(halted); core.set_halt(halted); capit.set_halt(halted)
+                sk = skim.update(eq_tot)
                 # 2) 새 체결 알림
                 if notifier.notify_trades:
-                    for tm, tk, t in collect_trades(snap_s, snap_c):
+                    for tm, tk, t in collect_trades(snap_s, snap_c, snap_p):
                         if tm > state["seen_trade"]:
                             state["seen_trade"] = tm
                             side = "🟦매수" if t.get("side") == "buy" else "🟧매도"
@@ -91,7 +92,7 @@ def _start_monitor(satellite, core, guard, notifier, cfg, mode):
                                           f"{extra}  <i>{t.get('reason','')}</i>")
                 # 3) 에러 알림
                 if notifier.notify_errors:
-                    err = snap_s.get("last_error") or snap_c.get("error") or ""
+                    err = snap_s.get("last_error") or snap_c.get("error") or snap_p.get("error") or ""
                     if err and err != state["last_err"]:
                         state["last_err"] = err
                         notifier.send(f"⚠️ <b>엔진 오류</b>\n{err.splitlines()[-1][:200]}")
@@ -100,8 +101,8 @@ def _start_monitor(satellite, core, guard, notifier, cfg, mode):
                 if hb_min > 0 and now - state["last_hb"] >= hb_min * 60:
                     state["last_hb"] = now
                     tag = "🔴차단중" if halted else "🟢정상"
-                    notifier.send(f"💓 {tag} 합산 {eq_tot:,.0f}원 "
-                                  f"(새틀 {eq_s:,.0f} / 코어 {eq_c:,.0f})")
+                    res = f" · 적립 {sk['reserve']:,.0f}원" if sk.get("enabled") else ""
+                    notifier.send(f"💓 {tag} 합산 {eq_tot:,.0f}원{res}")
             except Exception:
                 if notifier.notify_errors:
                     notifier.send(f"⚠️ 감시 스레드 예외\n{traceback.format_exc(limit=2)[:200]}")
@@ -118,13 +119,14 @@ def main():
     mode = cfg.get("mode", "paper")
 
     # 실거래: 한 계정 공유 → 엔진별 장부기반 브로커(자기 서브예산/수량만). 모의면 None.
-    sat_broker = core_broker = None
+    sat_broker = core_broker = capit_broker = None
     if mode == "live":
         from trader.account import LedgerBroker
         up = cfg.get("upbit", {})
         fee = float(cfg.get("trade", {}).get("fee", 0.0005))
         sat_broker = LedgerBroker(up.get("access_key", ""), up.get("secret_key", ""), fee=fee)
         core_broker = LedgerBroker(up.get("access_key", ""), up.get("secret_key", ""), fee=fee)
+        capit_broker = LedgerBroker(up.get("access_key", ""), up.get("secret_key", ""), fee=fee)
 
     # 새틀라이트(단기 전술 + AI 게이트)
     ai_cfg = cfg.get("ai", {})
@@ -141,22 +143,30 @@ def main():
     core = LongTrendTrader(cfg, state_path=os.path.join(BASE, "data", f"longterm_{mode}.json"),
                            broker=core_broker)
 
-    satellite.start_loop()
-    core.start_loop()       # 둘 다 평가 루프 기동(매매는 대시보드에서 활성화)
+    # 폭락엣지(무상관 보너스 엔진)
+    capit = CapitulationTrader(cfg, state_path=os.path.join(BASE, "data", f"capitulation_{mode}.json"),
+                               broker=capit_broker)
 
-    # ── 운영 안전망: 차단기 + 텔레그램 알림 감시 스레드 ──
+    satellite.start_loop()
+    core.start_loop()
+    capit.start_loop()      # 세 엔진 평가 루프 기동(매매는 대시보드에서 활성화)
+
+    # ── 운영 안전망: 차단기 + 적립 + 텔레그램 알림 감시 스레드 ──
     notifier = Notifier(cfg)
     guard = RiskGuard(cfg, state_path=os.path.join(BASE, "data", f"riskguard_{mode}.json"),
                       notifier=notifier)
-    _start_monitor(satellite, core, guard, notifier, cfg, mode)
+    skim = ProfitSkim(cfg, state_path=os.path.join(BASE, "data", f"skim_{mode}.json"), notifier=notifier)
+    _start_monitor(satellite, core, capit, guard, skim, notifier, cfg, mode)
 
-    app = create_combined_app(satellite, core)
+    app = create_combined_app(satellite, core, capit, skim)
     print("=" * 64)
     print(f"  SuperPro 통합 대시보드  ({'실거래' if mode=='live' else '모의'} 모드)")
     core_total = sum(core._per_coin(tk) for tk in core.tickers)
-    print(f"  🛰 새틀 {satellite.per_coin:,.0f}원×{len(satellite.tickers)}알트={satellite.per_coin*len(satellite.tickers):,.0f}  "
-          f"|  🪨 코어 {core.per_coin:,.0f}원×{len(core.tickers)}메이저={core_total:,.0f}"
-          f"{'' if core_enabled else '  (longterm.enabled=false — 코어 매매 비활성)'}")
+    print(f"  🛰 새틀 {satellite.per_coin*len(satellite.tickers):,.0f}  |  🪨 코어 {core_total:,.0f}"
+          f"  |  💥 폭락엣지 {capit.budget:,.0f}(공유풀)"
+          f"{'' if core_enabled else '  (코어 비활성)'}")
+    if skim.enabled:
+        print(f"  💰 적립: 고점대비 수익 {skim.ratio*100:.0f}% 자동적립 (현재 인출가능 {skim.reserve:,.0f}원)")
     if mode == "live":
         print("  ⚠️ 실거래: 같은 계정 공유. reconcile.py 로 정합성 점검 권장. 출금권한 금지.")
     print("  http://127.0.0.1:8000   (매매는 각 패널 [시작] 버튼)")

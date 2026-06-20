@@ -42,12 +42,13 @@ def create_app(engine: Engine) -> FastAPI:
     return app
 
 
-def create_combined_app(satellite, core) -> FastAPI:
-    """좌(새틀라이트)·우(코어) 2엔진 통합 대시보드. 두 엔진을 한 프로세스에서 구동.
+def create_combined_app(satellite, core, capit=None, skim=None) -> FastAPI:
+    """통합 대시보드 — 코어/새틀/폭락엣지 + 적립금. 한 프로세스에서 구동.
 
-    satellite: LiveTrader (snapshot())  /  core: LongTrendTrader (status())
+    satellite: LiveTrader / core: LongTrendTrader / capit: CapitulationTrader / skim: ProfitSkim
     """
-    app = FastAPI(title="SuperPro — 코어/새틀라이트 통합 대시보드")
+    app = FastAPI(title="SuperPro 통합 대시보드")
+    engines = {"satellite": satellite, "core": core, "capitulation": capit}
 
     @app.get("/")
     def index():
@@ -55,11 +56,16 @@ def create_combined_app(satellite, core) -> FastAPI:
 
     @app.get("/api/status")
     def status():
-        return JSONResponse({"satellite": satellite.snapshot(), "core": core.status()})
+        out = {"satellite": satellite.snapshot(), "core": core.status()}
+        if capit is not None:
+            out["capitulation"] = capit.status()
+        if skim is not None:
+            out["skim"] = skim.status()
+        return JSONResponse(out)
 
     @app.post("/api/{who}/{action}")
     def control(who: str, action: str):
-        eng = satellite if who == "satellite" else core if who == "core" else None
+        eng = engines.get(who)
         if eng is None or action not in ("start", "stop"):
             return JSONResponse({"error": "bad request"}, status_code=400)
         (eng.enable if action == "start" else eng.disable)()

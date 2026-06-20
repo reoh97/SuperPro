@@ -235,3 +235,31 @@ telegram:                    # 알림 — 체결·에러·차단·생존. 미설
   chat_id: ''                # 본인 챗 ID (@userinfobot 등으로 확인)
   notify_trades: true        # 매수/매도 체결 알림
   notify_errors: true        # 엔진 오류 알림
+capitulation:                # ★ 폭락엣지(무상관 보너스 엔진) — 거래량 항복 폭락 후 반등 단타
+  enabled: true              # 검증: 코어와 상관 0.01 → 합체 +29.6%→+36.5%(위험 거의 안 늘고)
+  budget_krw: 2000000        # 공유 풀(폭락 때만 투입, 90% 현금 대기). 총자본 내 배분은 조절
+  drop_pct: 0.20             # 폭락 기준: drop_days일 -20%↓
+  drop_days: 5
+  vol_mult: 2.0              # ★거래량 > 20일평균×2 (진짜 패닉항복만 — MDD 14%→2%의 핵심)
+  tp_pct: 0.04               # 익절 +4%
+  hold_days: 5               # 최대 보유(반등 안 오면 청산)
+  max_pos: 2                 # 동시보유(각 budget/2씩 = 집중). 수익/낙폭 최적
+  gate_ticker: KRW-BTC       # 시장 게이트(약세=200일선 아래+하락중 → 진입 중단=칼받기 회피)
+  gate_ma_n: 200
+  gate_slope_n: 20
+  interval_sec: 3600         # 1시간 체크(일봉 신호라 충분)
+  tickers:                   # 폭락 스캔 유니버스(전체 10 — 이벤트 많을수록 좋음)
+  - KRW-BTC
+  - KRW-ETH
+  - KRW-XRP
+  - KRW-SOL
+  - KRW-ADA
+  - KRW-DOGE
+  - KRW-TRX
+  - KRW-LINK
+  - KRW-AVAX
+  - KRW-DOT
+skim:                        # ★ 번 돈 적립(현금흐름 C) — 고점 기준 수익 절반 적립
+  enabled: true              # 합산자산 새 고점마다 초과분의 ratio 적립(약세장엔 0=원금보호)
+  ratio: 0.5                 # 번 것의 50% 적립(빼 쓸 돈) / 50%는 복리. 70/30 등 조절 가능
+  principal_krw: 20000000    # 원금 기준점(2,000만). 이 위로 번 것만 적립 대상

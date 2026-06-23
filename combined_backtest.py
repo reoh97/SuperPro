@@ -77,19 +77,25 @@ def capit_curve():
     return pd.Series(out)
 capit_eq=capit_curve()
 
-# ── 3) 그리드 = 사망(연속데이터 평균 -13%, MDD-60%, 룩어헤드 편향). 3M은 현금버퍼. ──
-CASH_BUF = 3_000_000
+# ── 3) 횡보 v3(범위 평균회귀, 메이커) — 3M, M=6. 그리드 대체(검증 통과). ──
+import sideways_v3_port as sv3
+side_s,_,_ = sv3.sim(2.5,0.8,0.05,20,6,budget=3_000_000)
+side_eq = side_s.resample("1D").last().ffill()
 
-# ── 합산 (코어 + 폭락 + 현금버퍼) ──
-full=pd.date_range(min(core_eq.index.min(),capit_eq.index.min()),
-                   max(core_eq.index.max(),capit_eq.index.max()),freq="D")
+# ── 합산 (코어 + 폭락 + 횡보v3) — 인덱스 자정 정규화로 시각 정렬 ──
+core_eq.index=core_eq.index.normalize(); capit_eq.index=capit_eq.index.normalize()
+side_eq.index=side_eq.index.normalize()
+full=pd.date_range(min(core_eq.index.min(),capit_eq.index.min(),side_eq.index.min()),
+                   max(core_eq.index.max(),capit_eq.index.max(),side_eq.index.max()),freq="D")
 ce=core_eq.reindex(full).ffill().fillna(PER_CORE*len(MAJORS))
 pe=capit_eq.reindex(full).ffill().fillna(cfg["capitulation"]["budget_krw"])
-ge=pd.Series(CASH_BUF, index=full)              # 현금버퍼(놀리는 3M)
+ge=side_eq.reindex(full).ffill().fillna(3_000_000)
 total=ce+pe+ge
-# 코어 워밍업(200일) 끝나는 시점부터 평가
+# 코어 워밍업(200일) 끝나는 시점부터 평가 — 모든 엔진 같은 날 배분액서 출발
 start=core_eq.index.min()
-total=total[total.index>=start]; ce=ce[ce.index>=start]; pe=pe[pe.index>=start]; ge=ge[ge.index>=start]
+ce=ce[ce.index>=start]; pe=pe[pe.index>=start]; ge=ge[ge.index>=start]
+ge=ge/ge.iloc[0]*3_000_000        # 횡보 리베이스(통합 시작일=3M)
+total=ce+pe+ge
 
 def stats(s):
     yrs=(s.index[-1]-s.index[0]).days/365.25
@@ -101,9 +107,9 @@ cagr,mdd,yrs=stats(total)
 init=total.iloc[0]
 print("="*64)
 print(f"  통합 올웨더 백테스트  ({start.date()} ~ {total.index[-1].date()}, {yrs:.1f}년)")
-print(f"  배분: 코어 {PER_CORE*len(MAJORS)/1e6:.0f}M + 폭락 2M + 현금버퍼 {CASH_BUF/1e6:.0f}M = {init/1e6:.0f}M")
+print(f"  배분: 코어 {PER_CORE*len(MAJORS)/1e6:.0f}M + 폭락 2M + 횡보v3 3M = {init/1e6:.0f}M")
 print("="*64)
-for nm,s in [("코어(추세)",ce),("폭락(급락)",pe),("현금버퍼",ge),("━ 합산",total)]:
+for nm,s in [("코어(추세)",ce),("폭락(급락)",pe),("횡보v3(범위)",ge),("━ 합산",total)]:
     c,m,_=stats(s)
     print(f"  {nm:<12} 시작 {s.iloc[0]/1e6:5.2f}M → 종료 {s.iloc[-1]/1e6:5.2f}M  CAGR {c*100:+6.1f}%  MDD {m*100:5.0f}%")
 print("="*64)

@@ -63,37 +63,36 @@ def sim(k,wq,stop,maxhold,M,budget=3_000_000):
     cagr=(s.iloc[-1]/budget)**(1/yrs)-1; mdd=((s-s.cummax())/s.cummax()).min()
     return s,cagr,mdd
 
-print("="*66); print("  횡보 v3 포트폴리오 — 실제 자본분산 MDD (예산 3M, 전코인)"); print("="*66)
-print(f"{'k':>4}{'wq':>5}{'stop':>6}{'hold':>5}{'M':>3}{'최종M':>8}{'CAGR':>9}{'MDD':>8}")
-best=None
-for M in (3,4,6):
+print("="*66); print("  횡보 v3 포트폴리오 — 실제 자본분산 MDD (예산 3M, 전코인)"); print("="*66) if __name__=="__main__" else None
+if __name__=="__main__":
+  print(f"{'k':>4}{'wq':>5}{'stop':>6}{'hold':>5}{'M':>3}{'최종M':>8}{'CAGR':>9}{'MDD':>8}")
+  best=None
+  for M in (3,4,6):
     for k,wq,stop,mh in [(2.5,0.8,0.05,20),(2.5,1.0,0.05,20),(2.5,0.8,0.05,48),(2.5,0.8,0.03,20)]:
         s,cagr,mdd=sim(k,wq,stop,mh,M)
         print(f"{k:>4}{wq:>5}{stop:>6}{mh:>5}{M:>3}{s.iloc[-1]/1e6:>7.2f}M{cagr*100:>8.1f}%{mdd*100:>7.0f}%")
         if best is None or (cagr+mdd)>best[0]: best=(cagr+mdd,k,wq,stop,mh,M,cagr,mdd)
-print(f"\n>>> 최고(CAGR+MDD): M={best[5]} k={best[1]} stop={best[3]} hold={best[4]} → CAGR{best[6]*100:+.1f}% MDD{best[7]*100:.0f}%")
+  print(f"\n>>> 최고(CAGR+MDD): M={best[5]} k={best[1]} stop={best[3]} hold={best[4]} → CAGR{best[6]*100:+.1f}% MDD{best[7]*100:.0f}%")
 
 # ── 최종 관문: 아웃오브샘플(전/후반) + 코어 상관 ──
-import glob
-from ratio_optimize import core_curve
-print("\n"+"="*66); print("  최종 검증 — 아웃오브샘플 + 코어 상관"); print("="*66)
-s,cagr,mdd=sim(2.5,0.8,0.05,20,6)
-half=allidx[len(allidx)//2]
-s1=s[s.index<=half]; s2=s[s.index>half]
-def sub(x): 
-    yrs=(x.index[-1]-x.index[0]).days/365.25
+if __name__=="__main__":
+  from ratio_optimize import core_curve
+  print("\n"+"="*66); print("  최종 검증 — 아웃오브샘플 + 코어 상관"); print("="*66)
+  s,cagr,mdd=sim(2.5,0.8,0.05,20,6)
+  half=allidx[len(allidx)//2]
+  s1=s[s.index<=half]; s2=s[s.index>half]
+  def sub(x):
     return (x.iloc[-1]/x.iloc[0]-1)*100,((x-x.cummax())/x.cummax()).min()*100
-r1,m1=sub(s1); r2,m2=sub(s2)
-print(f"  전반: 수익 {r1:+.1f}% MDD {m1:.0f}%   |   후반: 수익 {r2:+.1f}% MDD {m2:.0f}%")
-# 코어 월수익(메이저4 동일가중)
-ce=None
-for tk in cfg["longterm"]["tickers"]:
+  r1,m1=sub(s1); r2,m2=sub(s2)
+  print(f"  전반: 수익 {r1:+.1f}% MDD {m1:.0f}%   |   후반: 수익 {r2:+.1f}% MDD {m2:.0f}%")
+  ce=None
+  for tk in cfg["longterm"]["tickers"]:
     cv=core_curve(pd.read_csv(f"daily_data/{tk}.csv",index_col=0,parse_dates=True),cfg["longterm"])
     ce=cv if ce is None else ce.add(cv,fill_value=1.0)
-sm=s.resample("ME").last().pct_change()
-cm=(ce/4).resample("ME").last().pct_change()
-btc=pd.read_csv("daily_data/KRW-BTC.csv",index_col=0,parse_dates=True)["close"]
-bm=btc.resample("ME").last().pct_change()
-j=pd.concat([sm,cm,bm],axis=1).dropna(); j.columns=["side","core","btc"]
-print(f"  월수익 상관 — vs 코어: {j['side'].corr(j['core']):+.2f}   vs BTC: {j['side'].corr(j['btc']):+.2f}")
-print(f"  전체: CAGR {cagr*100:+.1f}% MDD {mdd*100:.0f}%")
+  sm=s.resample("ME").last().pct_change()
+  cm=(ce/4).resample("ME").last().pct_change()
+  btc=pd.read_csv("daily_data/KRW-BTC.csv",index_col=0,parse_dates=True)["close"]
+  bm=btc.resample("ME").last().pct_change()
+  j=pd.concat([sm,cm,bm],axis=1).dropna(); j.columns=["side","core","btc"]
+  print(f"  월수익 상관 — vs 코어: {j['side'].corr(j['core']):+.2f}   vs BTC: {j['side'].corr(j['btc']):+.2f}")
+  print(f"  전체: CAGR {cagr*100:+.1f}% MDD {mdd*100:.0f}%")

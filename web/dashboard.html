@@ -52,7 +52,7 @@
 </head>
 <body>
   <h1>SuperPro 통합 대시보드</h1>
-  <div class="sub"><b style="color:#d29922">코어</b>(추세) · <b style="color:#f85149">폭락엣지</b>(무상관) · <b style="color:#58a6ff">새틀</b>(알트) ·
+  <div class="sub"><b style="color:#d29922">코어</b>(추세) · <b style="color:#f85149">폭락엣지</b>(무상관) · <b style="color:#58a6ff">횡보</b>(범위) ·
     <span id="mode" class="badge mode">-</span> · 갱신 <span id="updated" class="muted">-</span></div>
 
   <div class="topbar">
@@ -65,7 +65,7 @@
   <div class="cols">
     <div class="panel core" id="panel-core"></div>
     <div class="panel cap" id="panel-capitulation"></div>
-    <div class="panel sat" id="panel-satellite"></div>
+    <div class="panel sat" id="panel-sideways"></div>
   </div>
 
 <script>
@@ -132,25 +132,17 @@ function renderPanel(id, o){
       <tbody>${tradeRows(o.coins)}</tbody></table>`;
 }
 
-function normSat(s){
-  const t=s.total||{}, ai=s.ai_regime||{};
-  let aiHtml='';
-  if(ai.enabled && ai.regime && MKT[ai.regime]){
-    const [txt,c]=MKT[ai.regime];
-    aiHtml=`<div class="aiBox"><b>AI 장세:</b> ${txt} <span class="muted">확신 ${ai.confidence}%</span>`
-      +(ai.risk_off?` <span class="badge bear">⚠️위험회피</span>`:"")
-      +`<br><span class="muted">${ai.reason||""}</span></div>`;
-  } else {
-    aiHtml=`<div class="aiBox muted">AI 장세: ${ai.enabled?"판단 대기...":(ai.disabled_reason||"미사용")}</div>`;
-  }
-  const gateCls = s.entries_allowed ? (s.gate&&s.gate.includes("방어")?"side":"on") : "off";
-  aiHtml += `<div style="margin-top:6px"><span class="badge ${gateCls}">진입: ${s.gate||(s.entries_allowed?"정상":"중단")}</span></div>`;
+function normSide(s){
+  const extra=`<div class="aiBox"><span class="badge on">📦 박스 대기 · 보유 ${s.n_positions||0}`
+    +`${s.n_pending?` ·미체결 ${s.n_pending}`:""}</span><br>`
+    +`<span class="muted">범위 평균회귀: 변동성수축+평탄+MA200위(진짜 박스)에서 하단밴드(-2.5σ) 지정가매수→상단밴드 매도. 범위깨짐 즉시손절.</span></div>`;
   return {
-    title:"🛰 새틀라이트", subtitle:"단기 전술 · AI게이트", running:s.running, error:s.last_error, extra:aiHtml,
-    equity:t.equity, pnl:t.pnl, ret_pct:t.ret_pct, realized:t.realized, budget:t.budget,
-    coins:(s.coins||[]).map(c=>({sym:c.ticker.replace("KRW-",""), price:c.price, regime:c.confirmed,
-      holding:c.has_position, info:(c.exit_mode||"")+(c.tranches_used?` ${c.tranches_used}회`:""),
-      avg:c.avg_price, unrl:c.unrealized, realized:c.realized, recent_trades:c.recent_trades})),
+    title:"📦 횡보", subtitle:"범위 평균회귀 · 메이커", running:s.running, error:s.error, extra,
+    equity:s.total_equity, pnl:(s.total_equity-s.total_base), ret_pct:s.total_pnl_pct,
+    realized:s.total_realized, budget:s.total_base,
+    coins:(s.coins||[]).map(c=>({sym:c.ticker.replace("KRW-",""), price:c.price, regime:null,
+      holding:c.holding, info:`${c.bars||0}봉`, avg:c.avg, unrl:c.unrl!=null?c.unrl:c.unrealized,
+      realized:c.realized, recent_trades:c.recent_trades})),
   };
 }
 function normCore(s){
@@ -180,19 +172,19 @@ function normCapit(s){
 async function refresh(){
   try{
     const s = await (await fetch("/api/status")).json();
-    const sat=normSat(s.satellite||{}), core=normCore(s.core||{}), cap=normCapit(s.capitulation||{});
-    document.getElementById("mode").textContent = (s.satellite&&s.satellite.mode)==="live"?"실거래":"모의";
-    document.getElementById("updated").textContent = (s.core&&s.core.last_update)||(s.satellite&&s.satellite.last_update)||"-";
+    const core=normCore(s.core||{}), cap=normCapit(s.capitulation||{}), side=normSide(s.sideways||{});
+    document.getElementById("mode").textContent = (s.core&&s.core.mode)==="live"?"실거래":"모의";
+    document.getElementById("updated").textContent = (s.core&&s.core.last_update)||(s.sideways&&s.sideways.last_update)||"-";
     // 합산(3엔진)
-    const eq=(sat.equity||0)+(core.equity||0)+(cap.equity||0), pnl=(sat.pnl||0)+(core.pnl||0)+(cap.pnl||0);
-    const real=(sat.realized||0)+(core.realized||0)+(cap.realized||0), bud=(sat.budget||0)+(core.budget||0)+(cap.budget||0);
+    const eq=(core.equity||0)+(cap.equity||0)+(side.equity||0), pnl=(core.pnl||0)+(cap.pnl||0)+(side.pnl||0);
+    const real=(core.realized||0)+(cap.realized||0)+(side.realized||0), bud=(core.budget||0)+(cap.budget||0)+(side.budget||0);
     document.getElementById("totEquity").textContent=won(eq);
     const tp=document.getElementById("totPnl"); tp.textContent=sign(pnl)+pct(bud?pnl/bud*100:null); tp.className="value "+cls(pnl);
     const tr=document.getElementById("totReal"); tr.textContent=sign(real); tr.className="value "+cls(real);
     const sk=s.skim||{}; document.getElementById("reserve").textContent = sk.enabled ? won(sk.reserve) : "꺼짐";
     renderPanel("core", core);
     renderPanel("capitulation", cap);
-    renderPanel("satellite", sat);
+    renderPanel("sideways", side);
   }catch(e){
     document.getElementById("totEquity").textContent="연결 실패";
   }

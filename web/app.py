@@ -42,13 +42,13 @@ def create_app(engine: Engine) -> FastAPI:
     return app
 
 
-def create_combined_app(satellite, core, capit=None, skim=None) -> FastAPI:
-    """통합 대시보드 — 코어/새틀/폭락엣지 + 적립금. 한 프로세스에서 구동.
+def create_combined_app(core, capit=None, side=None, skim=None) -> FastAPI:
+    """통합 대시보드 — 코어/폭락/횡보 + 적립금. 한 프로세스에서 구동.
 
-    satellite: LiveTrader / core: LongTrendTrader / capit: CapitulationTrader / skim: ProfitSkim
+    core: LongTrendTrader / capit: CapitulationTrader / side: SidewaysTrader / skim: ProfitSkim
     """
     app = FastAPI(title="SuperPro 통합 대시보드")
-    engines = {"satellite": satellite, "core": core, "capitulation": capit}
+    engines = {"core": core, "capitulation": capit, "sideways": side}
 
     @app.get("/")
     def index():
@@ -56,9 +56,11 @@ def create_combined_app(satellite, core, capit=None, skim=None) -> FastAPI:
 
     @app.get("/api/status")
     def status():
-        out = {"satellite": satellite.snapshot(), "core": core.status()}
+        out = {"core": core.status()}
         if capit is not None:
             out["capitulation"] = capit.status()
+        if side is not None:
+            out["sideways"] = side.status()
         if skim is not None:
             out["skim"] = skim.status()
         return JSONResponse(out)

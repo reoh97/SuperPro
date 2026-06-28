@@ -1,5 +1,6 @@
 """펀딩비 엣지 검증 — funding_data 받으면 실행. 포지셔닝이 미래수익 예측하나.
-가설: 펀딩 극단 음수(숏 과밀) → 스퀴즈로 튐(롱 신호). 극단 양수(롱 과열) → 조정.
+발견: 펀딩 IC 양수=포지셔닝 모멘텀(고펀딩→상승). OafS 코어상관 +0.09(무상관).
+   단 전반→후반 급감(식어감), 승률 52~56% → 경계선 신호.
 검증(과최적화 차단): ①IC train/test ②극단음수 진입 롱전략 OOS ③코어/v3 상관.
 롱온리라 '음수 펀딩 매수'만 거래 가능(양수→하락은 공매도 필요라 패스)."""
 from __future__ import annotations
@@ -14,7 +15,9 @@ COINS=[os.path.basename(p)[:-4] for p in sorted(glob.glob(f"{FUND}/KRW-*.csv"))]
 ZWIN=30  # 인과적 z-score 창(일, 펀딩 일일화 기준)
 
 def load(tk):
-    f=pd.read_csv(f"{FUND}/{tk}.csv",index_col=0,parse_dates=True)["funding_rate"]
+    raw=pd.read_csv(f"{FUND}/{tk}.csv",index_col=0)
+    raw.index=pd.to_datetime(raw.index,utc=True,format="ISO8601").tz_localize(None)
+    f=raw["funding_rate"]
     fd=f.resample("1D").mean().dropna()                 # 일일 펀딩(3회 평균)
     p=pd.read_csv(f"daily_data/{tk}.csv",index_col=0,parse_dates=True)["close"]
     p.index=p.index.normalize(); fd.index=fd.index.normalize()

@@ -63,15 +63,18 @@ def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
         tot = sum(s["total_equity"] for s in snaps.values())
         return snaps, tot
 
-    def collect_trades(snaps):
+    def collect_trades():
+        # 엔진의 실제 체결기록(engine.trades)을 직접 읽음 — 폭락/횡보 체결도 잡힘
         rows = []
-        for snap in snaps.values():
-            for c in snap.get("coins", []):
-                for t in (c.get("recent_trades") or []):
-                    rows.append((t.get("time", ""), c["ticker"], t))
+        for nm, e in engines:
+            for t in (getattr(e, "trades", []) or [])[-40:]:
+                rows.append((t.get("time", ""), nm, t))
         return sorted(rows)
 
     def loop():
+        # 시작 시점 이전 체결은 무시(재시작 시 과거거래 알림폭탄 방지)
+        init = collect_trades()
+        state["seen_trade"] = init[-1][0] if init else ""
         notifier.send(f"🤖 <b>SuperPro 가동</b> ({'실거래' if mode=='live' else '모의'}) — "
                       f"코어+폭락+횡보 감시. 차단기 낙폭 -{guard.max_dd*100:.0f}%/일일 -{guard.max_daily*100:.0f}%")
         while True:
@@ -81,16 +84,21 @@ def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
                 halted = guard.update(eq_tot)
                 core.set_halt(halted); capit.set_halt(halted); side.set_halt(halted)
                 sk = skim.update(eq_tot)
-                # 2) 새 체결 알림
+                # 2) 새 체결 알림 — 매도는 수익/손실 명확히
                 if notifier.notify_trades:
-                    for tm, tk, t in collect_trades(snaps):
-                        if tm > state["seen_trade"]:
-                            state["seen_trade"] = tm
-                            sd = "🟦매수" if t.get("side") == "buy" else "🟧매도"
-                            pnl = t.get("pnl")
-                            extra = (f" 손익 {pnl:+,.0f}원" if pnl is not None else "")
-                            notifier.send(f"{sd} {tk.replace('KRW-','')} @ {t.get('price'):,.0f}"
-                                          f"{extra}  <i>{t.get('reason','')}</i>")
+                    for tm, nm, t in collect_trades():
+                        if not tm or tm <= state["seen_trade"]:
+                            continue
+                        state["seen_trade"] = tm
+                        tk = (t.get("ticker") or "").replace("KRW-", "")
+                        price = t.get("price", 0) or 0
+                        if t.get("side") == "sell":
+                            pnl = t.get("pnl", 0) or 0
+                            emo = "💰 <b>수익실현</b>" if pnl >= 0 else "🔻 <b>손실</b>"
+                            notifier.send(f"{emo} · {nm} {tk}\n{pnl:+,.0f}원 @ {price:,.0f} "
+                                          f"<i>{t.get('reason','')}</i>")
+                        else:
+                            notifier.send(f"🟦 매수 · {nm} {tk} @ {price:,.0f}")
                 # 3) 에러 알림
                 if notifier.notify_errors:
                     err = next((s.get("error") for s in snaps.values() if s.get("error")), "")
@@ -102,8 +110,11 @@ def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
                 if hb_min > 0 and now - state["last_hb"] >= hb_min * 60:
                     state["last_hb"] = now
                     tag = "🔴차단중" if halted else "🟢정상"
+                    real = sum(s.get("total_realized", 0) for s in snaps.values())
+                    base = sum(s.get("total_base", 0) for s in snaps.values())
+                    pnl = eq_tot - base
                     res = f" · 적립 {sk['reserve']:,.0f}원" if sk.get("enabled") else ""
-                    notifier.send(f"💓 {tag} 합산 {eq_tot:,.0f}원{res}")
+                    notifier.send(f"💓 {tag} 합산 {eq_tot:,.0f}원 ({pnl:+,.0f} · 실현 {real:+,.0f}){res}")
             except Exception:
                 if notifier.notify_errors:
                     notifier.send(f"⚠️ 감시 스레드 예외\n{traceback.format_exc(limit=2)[:200]}")

@@ -26,6 +26,7 @@ from trader.longtrend import LongTrendTrader
 from trader.safety import Notifier, RiskGuard
 from trader.sideways import SidewaysTrader
 from trader.skim import ProfitSkim
+from trader.telegram_control import TelegramControl
 from web.app import create_combined_app
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -148,6 +149,11 @@ def main():
                       notifier=notifier)
     skim = ProfitSkim(cfg, state_path=os.path.join(BASE, "data", f"skim_{mode}.json"), notifier=notifier)
     _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode)
+
+    # ── 텔레그램 양방향 원격제어(폰에서 /상태 /정지 등) ──
+    control = TelegramControl(cfg, {"core": core, "capit": capit, "side": side},
+                              skim=skim, guard=guard)
+    control.start_loop()
 
     app = create_combined_app(core, capit, side, skim)
     print("=" * 64)

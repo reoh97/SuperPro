@@ -60,7 +60,8 @@ class ProfitSkim:
             new_profit = equity - self.baseline
             skim = new_profit * self.ratio
             self.reserve += skim
-            self.baseline = equity - skim       # 기준점 상승(같은 수익 반복적립 방지)
+            self.baseline = equity              # 새 고점=기준점(같은 고점 반복적립 방지). 절반은 자본에 남아 복리
+
             self.last_skim_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             if self.notifier:
                 self.notifier.send(f"💰 <b>적립</b> +{skim:,.0f}원 → 인출가능 누적 {self.reserve:,.0f}원 "

@@ -229,10 +229,10 @@ safety:                      # 운영 안전망 — 차단기(run_all.py 감시�
   max_daily_loss_pct: 0.05   # 당일 -5% → 신규진입 중단(다음 거래일 자동 해제)
   poll_sec: 30               # 감시 주기(초): 합산자산 점검·알림
   heartbeat_min: 60          # 생존신호 주기(분, 0=끔) — 봇이 살아있는지 텔레그램으로 통지
-telegram:                    # 알림+원격제어 — 미설정이면 자동 no-op(끔)
-  enabled: false             # true + 토큰/챗ID 있어야 작동. 키는 환경변수 TELEGRAM_BOT_TOKEN/CHAT_ID 권장
-  bot_token: ''              # @BotFather 로 봇 생성 후 토큰
-  chat_id: ''                # 본인 챗 ID (@userinfobot 등으로 확인)
+telegram:                    # 알림+원격제어 — 키 없으면 자동 no-op(끔, 안전)
+  enabled: true              # 켜둠. 키는 서버 .env(TELEGRAM_BOT_TOKEN/CHAT_ID)로 주입 → 없으면 자동 꺼짐
+  bot_token: ''              # ★비움 — git 노출방지. 서버 .env 에 넣을 것
+  chat_id: ''                # ★비움 — 서버 .env 에 넣을 것
   notify_trades: true        # 매수/매도 체결 알림(일방)
   notify_errors: true        # 엔진 오류 알림(일방)
   control: true              # ★양방향 원격제어 — 폰에서 /상태 /정지 /시작 /매수중단 (내 chat_id만)

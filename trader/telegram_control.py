@@ -127,24 +127,45 @@ class TelegramControl:
             elif action == "halt_off": e.set_halt(False)
 
     def _status_text(self) -> str:
-        lines = []
-        tot = 0.0
+        SUB = {"core": "추세·메이저", "capit": "급락·무상관", "side": "범위·메이커"}
+        eng_lines = []
+        tot_eq = tot_base = tot_real = 0.0
         for k, e in self.engines.items():
             s = e.status()
-            eq = s.get("total_equity", 0); tot += eq
-            run = "🟢" if s.get("running") else "⚪"
-            pnl = eq - s.get("total_base", 0)
-            lines.append(f"{run} {self.LABEL[k]} {_won(eq)} ({pnl:+,.0f}) 보유{s.get('n_positions',0)}")
-        head = f"💰 <b>합산 {_won(tot)}</b>"
-        if self.guard is not None:
-            g = self.guard.status()
-            if g.get("halted"):
-                head += f"  🔴차단({g.get('reason')})"
+            eq = s.get("total_equity", 0); base = s.get("total_base", 0)
+            real = s.get("total_realized", 0)
+            tot_eq += eq; tot_base += base; tot_real += real
+            run = "🟢가동" if s.get("running") else "⏸정지"
+            pnl = eq - base; pct = (pnl / base * 100) if base else 0.0
+            blk = (f"{self.LABEL[k]} <i>{SUB.get(k,'')}</i> · {run}\n"
+                   f"   평가 {_won(eq)} ({pnl:+,.0f} · {pct:+.2f}%)")
+            if real:
+                blk += f" · 실현 {real:+,.0f}"
+            held = [c for c in s.get("coins", []) if c.get("holding")]
+            if held:
+                for c in held:
+                    sym = c.get("ticker", "").replace("KRW-", "")
+                    unrl = c.get("unrealized", c.get("unrl", 0)) or 0
+                    blk += f"\n   • {sym} 평단 {c.get('avg',0):,.0f} ({unrl:+,.0f})"
+            else:
+                blk += "\n   • 보유 없음"
+            eng_lines.append(blk)
+        tot_pnl = tot_eq - tot_base
+        tot_pct = (tot_pnl / tot_base * 100) if tot_base else 0.0
+        head = ("📊 <b>SuperPro 현황</b> (모의)\n"
+                "━━━━━━━━━━━━━━\n"
+                f"💰 합산자산 <b>{_won(tot_eq)}</b>\n"
+                f"📈 손익 {tot_pnl:+,.0f} ({tot_pct:+.2f}%)\n"
+                f"✅ 실현손익 {tot_real:+,.0f}\n")
         if self.skim is not None:
             sk = self.skim.status()
             if sk.get("enabled"):
-                head += f"\n💵 적립(인출가능) {_won(sk.get('reserve',0))}"
-        return head + "\n" + "\n".join(lines)
+                head += f"🏦 적립(인출가능) {_won(sk.get('reserve', 0))}\n"
+        if self.guard is not None:
+            g = self.guard.status()
+            head += ("🔴 <b>차단중</b> — 신규진입 정지\n" if g.get("halted")
+                     else "🛡 차단기 정상\n")
+        return head + "━━━━━━━━━━━━━━\n" + "\n\n".join(eng_lines)
 
     def _help_text(self) -> str:
         return ("🎮 <b>명령 목록</b>\n"

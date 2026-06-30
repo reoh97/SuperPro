@@ -94,13 +94,17 @@ def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
                         state["seen_trade"] = tm
                         tk = (t.get("ticker") or "").replace("KRW-", "")
                         price = t.get("price", 0) or 0
+                        amt = t.get("amount", 0) or 0
+                        fee = t.get("fee", 0) or 0
                         if t.get("side") == "sell":
                             pnl = t.get("pnl", 0) or 0
                             emo = "💰 <b>수익실현</b>" if pnl >= 0 else "🔻 <b>손실</b>"
-                            notifier.send(f"{emo} · {nm} {tk}\n{pnl:+,.0f}원 @ {price:,.0f} "
-                                          f"<i>{t.get('reason','')}</i>")
+                            notifier.send(f"{emo} · {nm} {tk}\n"
+                                          f"손익 {pnl:+,.0f}원 (매도액 {amt:,.0f} · 수수료 {fee:,.0f})\n"
+                                          f"@ {price:,.0f} <i>{t.get('reason','')}</i>")
                         else:
-                            notifier.send(f"🟦 매수 · {nm} {tk} @ {price:,.0f}")
+                            notifier.send(f"🟦 <b>매수</b> · {nm} {tk}\n"
+                                          f"{amt:,.0f}원어치 @ {price:,.0f} (수수료 {fee:,.0f}원)")
                 # 3) 에러 알림
                 if notifier.notify_errors:
                     err = next((s.get("error") for s in snaps.values() if s.get("error")), "")

@@ -65,10 +65,26 @@ class CapitulationTrader:
         self._last_update: Optional[str] = None
         self._last_error: Optional[str] = None
         self._last_bar: Dict[str, str] = {}
+        self._sell_requests: list = []        # 텔레그램 수동매도 요청(엔진 스레드가 처리)
         self._load()
 
     def set_halt(self, halted: bool):
         self._halt = bool(halted)
+
+    def request_sell(self, ticker: str) -> bool:
+        """외부(텔레그램) 매도 요청 적재. 엔진 스레드가 1초 내 처리(경쟁상태 방지)."""
+        self._sell_requests.append(ticker)
+        return True
+
+    def _drain_sells(self):
+        try:
+            while self._sell_requests:
+                tk = self._sell_requests.pop(0)
+                for p in [x for x in self.positions if x["ticker"] == tk]:
+                    self._sell(p, self.prices.get(tk, p["entry"]), "수동매도")
+            self._save()
+        except Exception:
+            self._last_error = traceback.format_exc(limit=3)
 
     # ---------- 상태 영속 ----------
     def _load(self):
@@ -117,6 +133,8 @@ class CapitulationTrader:
                 self._last_error = traceback.format_exc(limit=3)
             for _ in range(int(self.interval_sec)):
                 if self._stop.is_set(): break
+                if self._sell_requests:
+                    self._drain_sells()
                 time.sleep(1)
 
     # ---------- 평가 ----------
@@ -195,7 +213,8 @@ class CapitulationTrader:
         self.cash -= spend
         self.positions.append({"ticker": tk, "entry": price, "size": size,
                                "cost": spend - fee, "day": _now(), "hold_left": self.hold_days})
-        self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": price, "amount": spend})
+        self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": price, "amount": spend,
+                            "fee": fee, "size": size})
 
     def _sell(self, p: dict, price: float, reason: str):
         if self.broker is None:
@@ -207,7 +226,8 @@ class CapitulationTrader:
         self.cash += gross - fee
         net = (gross - fee) - p["cost"]; self.realized_pnl += net
         self.trades.append({"time": _now(), "side": "sell", "ticker": p["ticker"], "price": price,
-                            "amount": gross, "pnl": net, "reason": reason})
+                            "amount": gross, "pnl": net, "reason": reason,
+                            "fee": fee, "size": p["size"]})
         self.positions = [x for x in self.positions if x is not p]
 
     # ---------- 상태 ----------
@@ -222,7 +242,7 @@ class CapitulationTrader:
             "mkt_bear": self._mkt_bear, "n_positions": len(self.positions),
             "last_update": self._last_update, "error": self._last_error,
             "coins": [{"ticker": p["ticker"], "price": self.prices.get(p["ticker"]),
-                       "holding": True, "avg": p["entry"],
+                       "holding": True, "avg": p["entry"], "amount": p["cost"],
                        "unrealized": p["size"] * (self.prices.get(p["ticker"], p["entry"]) - p["entry"]),
                        "realized": 0.0, "hold_left": p["hold_left"],
                        "recent_trades": []} for p in self.positions],

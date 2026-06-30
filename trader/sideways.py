@@ -64,10 +64,26 @@ class SidewaysTrader:
         self._last_update: Optional[str] = None
         self._last_error: Optional[str] = None
         self._last_bar: Dict[str, str] = {}
+        self._sell_requests: list = []        # 텔레그램 수동매도 요청(엔진 스레드가 처리)
         self._load()
 
     def set_halt(self, halted: bool):
         self._halt = bool(halted)
+
+    def request_sell(self, ticker: str) -> bool:
+        """외부(텔레그램) 매도 요청 적재. 엔진 스레드가 1초 내 시장가 청산(경쟁상태 방지)."""
+        self._sell_requests.append(ticker)
+        return True
+
+    def _drain_sells(self):
+        try:
+            while self._sell_requests:
+                tk = self._sell_requests.pop(0)
+                for p in [x for x in self.positions if x["ticker"] == tk]:
+                    self._sell(p, self.prices.get(tk, p["entry"]), "수동매도", maker=False)
+            self._save()
+        except Exception:
+            self._last_error = traceback.format_exc(limit=3)
 
     # ---------- 상태 영속 ----------
     def _load(self):
@@ -117,6 +133,8 @@ class SidewaysTrader:
                 self._last_error = traceback.format_exc(limit=3)
             for _ in range(int(self.interval_sec)):
                 if self._stop.is_set(): break
+                if self._sell_requests:
+                    self._drain_sells()
                 time.sleep(1)
 
     # ---------- 지표 ----------
@@ -211,7 +229,8 @@ class SidewaysTrader:
             self.cash -= spend
             self.positions.append({"ticker": tk, "state": "open", "entry": lower, "size": size,
                                    "cost": spend - fee, "upper": upper, "bars": 0, "day": _now()})
-            self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": lower, "amount": spend})
+            self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": lower, "amount": spend,
+                                "fee": fee, "size": size})
         else:                                          # 실거래: 지정가 매수 주문(미체결 가능)
             uuid = self.broker.place_limit_buy(tk, lower, spend)
             if uuid:
@@ -229,7 +248,8 @@ class SidewaysTrader:
             if f is not None and f.filled and f.volume > 0:        # 체결 완료
                 self.positions.append({"ticker": tk, "state": "open", "entry": f.price, "size": f.volume,
                                        "cost": q["krw"] - f.fee, "upper": q["upper"], "bars": 0, "day": _now()})
-                self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": f.price, "amount": q["krw"]})
+                self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": f.price, "amount": q["krw"],
+                                    "fee": f.fee, "size": f.volume})
                 self.pending.remove(q)
                 continue
             # 미체결인데 박스가 깨졌거나 새 봉이 한참 지나면 취소(체결 안 되는 주문 정리)
@@ -261,7 +281,8 @@ class SidewaysTrader:
         self.cash += gross - fee
         net = (gross - fee) - p["cost"]; self.realized_pnl += net
         self.trades.append({"time": _now(), "side": "sell", "ticker": tk, "price": price,
-                            "amount": gross, "pnl": net, "reason": reason})
+                            "amount": gross, "pnl": net, "reason": reason,
+                            "fee": fee, "size": p["size"]})
         self.positions = [x for x in self.positions if x is not p]
 
     # ---------- 상태 ----------
@@ -276,7 +297,7 @@ class SidewaysTrader:
             "n_positions": len(self.positions), "n_pending": len(self.pending),
             "last_update": self._last_update, "error": self._last_error,
             "coins": [{"ticker": p["ticker"], "price": self.prices.get(p["ticker"]),
-                       "holding": True, "avg": p["entry"],
+                       "holding": True, "avg": p["entry"], "amount": p["cost"],
                        "unrealized": p["size"] * (self.prices.get(p["ticker"], p["entry"]) - p["entry"]),
                        "realized": 0.0, "bars": p.get("bars", 0), "target": p["upper"],
                        "recent_trades": []} for p in self.positions],

@@ -58,6 +58,7 @@ class LongTrendTrader:
         self._running = threading.Event()
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self._sell_requests: list = []        # 텔레그램 수동매도 요청(엔진 스레드가 처리)
         self._last_update: Optional[str] = None
         self._last_error: Optional[str] = None
         self._load()
@@ -123,7 +124,26 @@ class LongTrendTrader:
             for _ in range(int(self.interval_sec)):
                 if self._stop.is_set():
                     break
+                if self._sell_requests:
+                    self._drain_sells()
                 time.sleep(1)
+
+    # ---------- 수동 매도(텔레그램) ----------
+    def request_sell(self, ticker: str) -> bool:
+        """외부(텔레그램)에서 매도 요청 적재. 실제 매도는 엔진 스레드가 1초 내 처리(경쟁상태 방지)."""
+        self._sell_requests.append(ticker)
+        return True
+
+    def _drain_sells(self):
+        try:
+            while self._sell_requests:
+                tk = self._sell_requests.pop(0)
+                c = self.coins.get(tk)
+                if c and c.get("position") is not None:
+                    self._sell(tk, c.get("price") or c["position"]["entry"], "수동매도")
+            self._save()
+        except Exception:
+            self._last_error = traceback.format_exc(limit=3)
 
     # ---------- 종목 평가(일봉) ----------
     def _eval_coin(self, tk: str):
@@ -179,7 +199,8 @@ class LongTrendTrader:
             price, size, fee, spend = f.price, f.volume, f.fee, f.krw
         c["cash"] -= spend
         c["position"] = {"entry": price, "size": size, "cost": spend, "peak": price, "time": _now()}
-        c["trades"].append({"time": _now(), "side": "buy", "price": price, "amount": spend})
+        c["trades"].append({"time": _now(), "side": "buy", "price": price, "amount": spend,
+                            "fee": fee, "size": size})
 
     def _sell(self, tk: str, price: float, reason: str):
         c = self.coins[tk]
@@ -199,10 +220,20 @@ class LongTrendTrader:
         net = (gross - fee) - p["cost"]
         c["realized_pnl"] += net
         c["trades"].append({"time": _now(), "side": "sell", "price": price,
-                            "amount": gross, "pnl": net, "reason": reason})
+                            "amount": gross, "pnl": net, "reason": reason,
+                            "fee": fee, "size": p["size"]})
         c["position"] = None
 
     # ---------- 상태 ----------
+    @property
+    def trades(self) -> list:
+        """알림용 통합 거래기록(코인별→평탄화, ticker 부착)."""
+        out = []
+        for tk, c in self.coins.items():
+            for t in c.get("trades", [])[-10:]:
+                out.append({**t, "ticker": tk})
+        return out
+
     def status(self) -> dict:
         coins = []
         tot_eq = tot_base = 0.0
@@ -216,6 +247,7 @@ class LongTrendTrader:
             coins.append({
                 "ticker": tk, "price": c["price"], "holding": pos is not None,
                 "avg": pos["entry"] if pos else None,
+                "amount": pos["cost"] if pos else 0.0,
                 "pnl_pct": ((c["price"] / pos["entry"] - 1) * 100) if pos and c["price"] else None,
                 "realized": c["realized_pnl"], "equity": eq,
                 "unrealized": (pos["size"] * (c["price"] - pos["entry"])) if (pos and c["price"]) else 0.0,

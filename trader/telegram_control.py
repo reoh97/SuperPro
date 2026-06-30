@@ -110,6 +110,25 @@ class TelegramControl:
         elif cmd in ("해제", "resume"):
             self._apply("halt_off", None)
             self._send("🟢 매수중단 해제 — 신규진입 재개.")
+        elif cmd in ("매도", "팔아", "sell"):
+            if not arg:
+                self._send("종목을 지정하세요. 예: /매도 ADA"); return
+            sym = arg.upper().replace("KRW-", "")
+            ticker = "KRW-" + sym
+            found = []
+            for k, e in self.engines.items():
+                try:
+                    s = e.status()
+                except Exception:
+                    continue
+                holds = any(c.get("holding") and c.get("ticker") == ticker for c in s.get("coins", []))
+                if holds and hasattr(e, "request_sell"):
+                    e.request_sell(ticker); found.append(self.LABEL[k])
+            if found:
+                self._send(f"📤 <b>매도 요청</b> {sym} — {', '.join(found)}\n"
+                           f"곧 시장가 청산(1초 내). 완료되면 체결 알림이 갑니다.")
+            else:
+                self._send(f"❓ {sym} 보유 포지션이 없어요. /상태로 확인하세요.")
         elif cmd in ("도움", "help", "?"):
             self._send(self._help_text())
         else:
@@ -146,7 +165,8 @@ class TelegramControl:
                 for c in held:
                     sym = c.get("ticker", "").replace("KRW-", "")
                     unrl = c.get("unrealized", c.get("unrl", 0)) or 0
-                    blk += f"\n   • {sym} 평단 {c.get('avg',0):,.0f} ({unrl:+,.0f})"
+                    inv = c.get("amount", 0) or 0
+                    blk += f"\n   • {sym} {inv:,.0f}원어치 · 평단 {c.get('avg',0):,.0f} ({unrl:+,.0f})"
             else:
                 blk += "\n   • 보유 없음"
             eng_lines.append(blk)
@@ -174,4 +194,5 @@ class TelegramControl:
                 "/정지 — 전 엔진 정지 (/정지 횡보 = 횡보만)\n"
                 "/매수중단 — 신규매수만 중단(청산은 계속)\n"
                 "/해제 — 매수중단 해제\n"
+                "/매도 ADA — 그 종목 즉시 시장가 청산(수동)\n"
                 "엔진명: 코어 · 폭락 · 횡보")

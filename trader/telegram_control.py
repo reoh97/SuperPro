@@ -166,7 +166,10 @@ class TelegramControl:
                     sym = c.get("ticker", "").replace("KRW-", "")
                     unrl = c.get("unrealized", c.get("unrl", 0)) or 0
                     inv = c.get("amount", 0) or 0
-                    blk += f"\n   • {sym} {inv:,.0f}원어치 · 평단 {c.get('avg',0):,.0f} ({unrl:+,.0f})"
+                    be = c.get("breakeven")
+                    betxt = f" · 본전 {be:,.0f}" if be else ""
+                    blk += (f"\n   • {sym} {inv:,.0f}원어치 · 평단 {c.get('avg',0):,.0f}"
+                            f"{betxt} ({unrl:+,.0f})")
             else:
                 blk += "\n   • 보유 없음"
             eng_lines.append(blk)

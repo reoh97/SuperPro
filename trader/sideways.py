@@ -228,7 +228,8 @@ class SidewaysTrader:
             size = (spend - fee) / lower
             self.cash -= spend
             self.positions.append({"ticker": tk, "state": "open", "entry": lower, "size": size,
-                                   "cost": spend - fee, "upper": upper, "bars": 0, "day": _now()})
+                                   "cost": spend, "buy_fee": fee,   # cost=총지출(매수수수료 포함)
+                                   "upper": upper, "bars": 0, "day": _now()})
             self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": lower, "amount": spend,
                                 "fee": fee, "size": size})
         else:                                          # 실거래: 지정가 매수 주문(미체결 가능)
@@ -247,7 +248,8 @@ class SidewaysTrader:
             f = self.broker.check_order(q["uuid"])
             if f is not None and f.filled and f.volume > 0:        # 체결 완료
                 self.positions.append({"ticker": tk, "state": "open", "entry": f.price, "size": f.volume,
-                                       "cost": q["krw"] - f.fee, "upper": q["upper"], "bars": 0, "day": _now()})
+                                       "cost": q["krw"], "buy_fee": f.fee,
+                                       "upper": q["upper"], "bars": 0, "day": _now()})
                 self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": f.price, "amount": q["krw"],
                                     "fee": f.fee, "size": f.volume})
                 self.pending.remove(q)
@@ -279,10 +281,11 @@ class SidewaysTrader:
                 return
             price, gross, fee = f.price, f.krw, f.fee
         self.cash += gross - fee
-        net = (gross - fee) - p["cost"]; self.realized_pnl += net
+        net = (gross - fee) - p["cost"]; self.realized_pnl += net   # cost=총지출이라 왕복수수료 반영
+        fee_total = p.get("buy_fee", 0) + fee                        # 매수+매도 수수료 합
         self.trades.append({"time": _now(), "side": "sell", "ticker": tk, "price": price,
                             "amount": gross, "pnl": net, "reason": reason,
-                            "fee": fee, "size": p["size"]})
+                            "fee": fee_total, "size": p["size"]})
         self.positions = [x for x in self.positions if x is not p]
 
     # ---------- 상태 ----------
@@ -298,6 +301,7 @@ class SidewaysTrader:
             "last_update": self._last_update, "error": self._last_error,
             "coins": [{"ticker": p["ticker"], "price": self.prices.get(p["ticker"]),
                        "holding": True, "avg": p["entry"], "amount": p["cost"],
+                       "breakeven": p["cost"] / (p["size"] * (1 - self.fee)),
                        "unrealized": p["size"] * (self.prices.get(p["ticker"], p["entry"]) - p["entry"]),
                        "realized": 0.0, "bars": p.get("bars", 0), "target": p["upper"],
                        "recent_trades": []} for p in self.positions],

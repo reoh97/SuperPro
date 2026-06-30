@@ -100,8 +100,8 @@ def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
                             pnl = t.get("pnl", 0) or 0
                             emo = "💰 <b>수익실현</b>" if pnl >= 0 else "🔻 <b>손실</b>"
                             notifier.send(f"{emo} · {nm} {tk}\n"
-                                          f"손익 {pnl:+,.0f}원 (매도액 {amt:,.0f} · 수수료 {fee:,.0f})\n"
-                                          f"@ {price:,.0f} <i>{t.get('reason','')}</i>")
+                                          f"손익 {pnl:+,.0f}원 (왕복수수료 {fee:,.0f} 차감 후)\n"
+                                          f"매도액 {amt:,.0f} @ {price:,.0f} <i>{t.get('reason','')}</i>")
                         else:
                             notifier.send(f"🟦 <b>매수</b> · {nm} {tk}\n"
                                           f"{amt:,.0f}원어치 @ {price:,.0f} (수수료 {fee:,.0f}원)")

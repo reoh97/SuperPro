@@ -212,7 +212,8 @@ class CapitulationTrader:
             price, size, fee, spend = f.price, f.volume, f.fee, f.krw
         self.cash -= spend
         self.positions.append({"ticker": tk, "entry": price, "size": size,
-                               "cost": spend - fee, "day": _now(), "hold_left": self.hold_days})
+                               "cost": spend, "buy_fee": fee,    # cost=총지출(매수수수료 포함) → 손익 정확
+                               "day": _now(), "hold_left": self.hold_days})
         self.trades.append({"time": _now(), "side": "buy", "ticker": tk, "price": price, "amount": spend,
                             "fee": fee, "size": size})
 
@@ -224,10 +225,11 @@ class CapitulationTrader:
             if f is None: return
             price, gross, fee = f.price, f.krw, f.fee
         self.cash += gross - fee
-        net = (gross - fee) - p["cost"]; self.realized_pnl += net
+        net = (gross - fee) - p["cost"]; self.realized_pnl += net   # cost=총지출이라 왕복수수료 반영
+        fee_total = p.get("buy_fee", 0) + fee                        # 매수+매도 수수료 합
         self.trades.append({"time": _now(), "side": "sell", "ticker": p["ticker"], "price": price,
                             "amount": gross, "pnl": net, "reason": reason,
-                            "fee": fee, "size": p["size"]})
+                            "fee": fee_total, "size": p["size"]})
         self.positions = [x for x in self.positions if x is not p]
 
     # ---------- 상태 ----------
@@ -243,6 +245,7 @@ class CapitulationTrader:
             "last_update": self._last_update, "error": self._last_error,
             "coins": [{"ticker": p["ticker"], "price": self.prices.get(p["ticker"]),
                        "holding": True, "avg": p["entry"], "amount": p["cost"],
+                       "breakeven": p["cost"] / (p["size"] * (1 - self.fee)),
                        "unrealized": p["size"] * (self.prices.get(p["ticker"], p["entry"]) - p["entry"]),
                        "realized": 0.0, "hold_left": p["hold_left"],
                        "recent_trades": []} for p in self.positions],

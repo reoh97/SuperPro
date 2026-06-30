@@ -198,7 +198,7 @@ class LongTrendTrader:
                 return
             price, size, fee, spend = f.price, f.volume, f.fee, f.krw
         c["cash"] -= spend
-        c["position"] = {"entry": price, "size": size, "cost": spend, "peak": price, "time": _now()}
+        c["position"] = {"entry": price, "size": size, "cost": spend, "buy_fee": fee, "peak": price, "time": _now()}
         c["trades"].append({"time": _now(), "side": "buy", "price": price, "amount": spend,
                             "fee": fee, "size": size})
 
@@ -219,9 +219,10 @@ class LongTrendTrader:
         c["cash"] += gross - fee
         net = (gross - fee) - p["cost"]
         c["realized_pnl"] += net
+        fee_total = p.get("buy_fee", 0) + fee                        # 매수+매도 수수료 합
         c["trades"].append({"time": _now(), "side": "sell", "price": price,
                             "amount": gross, "pnl": net, "reason": reason,
-                            "fee": fee, "size": p["size"]})
+                            "fee": fee_total, "size": p["size"]})
         c["position"] = None
 
     # ---------- 상태 ----------
@@ -248,6 +249,7 @@ class LongTrendTrader:
                 "ticker": tk, "price": c["price"], "holding": pos is not None,
                 "avg": pos["entry"] if pos else None,
                 "amount": pos["cost"] if pos else 0.0,
+                "breakeven": (pos["cost"] / (pos["size"] * (1 - self.fee))) if pos else None,
                 "pnl_pct": ((c["price"] / pos["entry"] - 1) * 100) if pos and c["price"] else None,
                 "realized": c["realized_pnl"], "equity": eq,
                 "unrealized": (pos["size"] * (c["price"] - pos["entry"])) if (pos and c["price"]) else 0.0,

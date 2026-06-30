@@ -69,7 +69,7 @@ def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
         for nm, e in engines:
             for t in (getattr(e, "trades", []) or [])[-40:]:
                 rows.append((t.get("time", ""), nm, t))
-        return sorted(rows)
+        return sorted(rows, key=lambda r: r[0])   # 시각만으로 정렬(딕셔너리 비교 방지)
 
     def loop():
         # 시작 시점 이전 체결은 무시(재시작 시 과거거래 알림폭탄 방지)
@@ -80,10 +80,12 @@ def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
         while True:
             try:
                 snaps, eq_tot = equity_of()
-                # 1) 차단기 + 적립(고점 50%)
+                # 1) 차단기는 평가자산(미실현 포함)으로 낙폭 감시
                 halted = guard.update(eq_tot)
                 core.set_halt(halted); capit.set_halt(halted); side.set_halt(halted)
-                sk = skim.update(eq_tot)
+                # 적립은 '확정수익(실현)' 기준 — 미실현 반짝고점 적립 방지(원금보존)
+                real_eq = sum(s.get("total_base", 0) + s.get("total_realized", 0) for s in snaps.values())
+                sk = skim.update(real_eq)
                 # 2) 새 체결 알림 — 매도는 수익/손실 명확히
                 if notifier.notify_trades:
                     for tm, nm, t in collect_trades():

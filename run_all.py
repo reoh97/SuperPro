@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -51,11 +52,49 @@ def load_dotenv(path: str) -> None:
                 os.environ[key] = val
 
 
+def _sync_reports(base: str) -> bool:
+    """거래기록을 뽑아 'paper-reports' 브랜치로 자동 push(코드 브랜치 불건드림).
+    별도 인덱스로 reports/만 담아 commit-tree → force-push. 실패해도 봇엔 무해."""
+    try:
+        subprocess.run([sys.executable, os.path.join(base, "export_trades.py")],
+                       cwd=base, timeout=40, capture_output=True)
+        files = ["reports/trades.csv", "reports/summary.txt"]
+        if not all(os.path.exists(os.path.join(base, f)) for f in files):
+            return False
+        idx = os.path.join(base, ".git", "report-index")
+        genv = {**os.environ, "GIT_INDEX_FILE": idx,
+                "GIT_AUTHOR_NAME": "superpro", "GIT_AUTHOR_EMAIL": "bot@superpro",
+                "GIT_COMMITTER_NAME": "superpro", "GIT_COMMITTER_EMAIL": "bot@superpro"}
+        def g(*a):
+            return subprocess.run(["git", *a], cwd=base, env=genv,
+                                  capture_output=True, text=True, timeout=30)
+        if os.path.exists(idx):
+            os.remove(idx)
+        g("add", "-f", *files)
+        tree = g("write-tree").stdout.strip()
+        if not tree:
+            return False
+        parent = g("rev-parse", "--verify", "-q", "refs/remotes/origin/paper-reports").stdout.strip()
+        args = ["commit-tree", tree, "-m", "auto: 거래기록"]
+        if parent:
+            args += ["-p", parent]
+        commit = g(*args).stdout.strip()
+        if not commit:
+            return False
+        g("push", "-f", "origin", f"{commit}:refs/heads/paper-reports")
+        g("fetch", "origin", "paper-reports")   # origin/paper-reports 갱신(다음 parent용)
+        return True
+    except Exception:
+        return False
+
+
 def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
     """감시 스레드: 합산자산→차단기·적립, 새 체결·에러 알림, 생존신호(heartbeat)."""
     poll = max(int(cfg.get("safety", {}).get("poll_sec", 30)), 10)
     hb_min = float(cfg.get("safety", {}).get("heartbeat_min", 60))
-    state = {"seen_trade": "", "last_err": "", "last_hb": 0.0}
+    rep_on = bool(cfg.get("reports", {}).get("auto_push", True))
+    rep_min = float(cfg.get("reports", {}).get("interval_min", 10))
+    state = {"seen_trade": "", "last_err": "", "last_hb": 0.0, "last_report": 0.0}
     engines = [("코어", core), ("폭락", capit), ("횡보", side)]
 
     def equity_of():
@@ -121,6 +160,10 @@ def _start_monitor(core, capit, side, guard, skim, notifier, cfg, mode):
                     pnl = eq_tot - base
                     res = f" · 적립 {sk['reserve']:,.0f}원" if sk.get("enabled") else ""
                     notifier.send(f"💓 {tag} 합산 {eq_tot:,.0f}원 ({pnl:+,.0f} · 실현 {real:+,.0f}){res}")
+                # 5) 거래기록 자동 push(paper-reports 브랜치) — 원격 분석용
+                if rep_on and now - state["last_report"] >= rep_min * 60:
+                    state["last_report"] = now
+                    _sync_reports(BASE)
             except Exception:
                 if notifier.notify_errors:
                     notifier.send(f"⚠️ 감시 스레드 예외\n{traceback.format_exc(limit=2)[:200]}")

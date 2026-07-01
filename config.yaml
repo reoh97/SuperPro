@@ -260,6 +260,9 @@ capitulation:                # ★ 폭락엣지(무상관 보너스 엔진) — 
   - KRW-LINK
   - KRW-AVAX
   - KRW-DOT
+reports:                     # 거래기록 자동 push — paper-reports 브랜치로(코드 브랜치 불건드림)
+  auto_push: true            # 봇이 주기적으로 기록을 git에 올림 → 원격에서 분석. 끄려면 false
+  interval_min: 10           # 올리는 주기(분)
 skim:                        # ★ 번 돈 적립(현금흐름 C) — 고점 기준 수익 절반 적립
   enabled: true              # 합산자산 새 고점마다 초과분의 ratio 적립(약세장엔 0=원금보호)
   ratio: 0.5                 # 번 것의 50% 적립(빼 쓸 돈) / 50%는 복리. 70/30 등 조절 가능

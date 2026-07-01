@@ -129,6 +129,27 @@ class TelegramControl:
                            f"곧 시장가 청산(1초 내). 완료되면 체결 알림이 갑니다.")
             else:
                 self._send(f"❓ {sym} 보유 포지션이 없어요. /상태로 확인하세요.")
+        elif cmd in ("거래", "기록", "history"):
+            rows = []
+            for k, e in self.engines.items():
+                for t in (getattr(e, "trades", []) or [])[-15:]:
+                    rows.append((t.get("time", ""), self.LABEL[k], t))
+            rows.sort(key=lambda r: r[0])
+            rows = rows[-12:]
+            if not rows:
+                self._send("📒 아직 거래 없음"); return
+            out = ["📒 <b>최근 거래</b>"]
+            for tm, lbl, t in rows:
+                tk = (t.get("ticker") or "").replace("KRW-", "")
+                when = tm[5:16] if len(tm) >= 16 else tm
+                if t.get("side") == "sell":
+                    pnl = t.get("pnl", 0) or 0
+                    fee = t.get("fee", 0) or 0
+                    mk = "💰" if pnl >= 0 else "🔻"
+                    out.append(f"{when} {lbl}{tk} {mk}{pnl:+,.0f}원 (수수료{fee:,.0f}·{t.get('reason','')})")
+                else:
+                    out.append(f"{when} {lbl}{tk} 🟦매수 {t.get('amount',0):,.0f}원")
+            self._send("\n".join(out))
         elif cmd in ("도움", "help", "?"):
             self._send(self._help_text())
         else:
@@ -187,7 +208,7 @@ class TelegramControl:
         if self.skim is not None:
             sk = self.skim.status()
             if sk.get("enabled"):
-                head += f"🏦 적립(인출가능) {_won(sk.get('reserve', 0))}\n"
+                head += f"🏦 그중 적립(인출가능) {_won(sk.get('reserve', 0))}\n"
         if self.guard is not None:
             g = self.guard.status()
             head += ("🔴 <b>차단중</b> — 신규진입 정지\n" if g.get("halted")
@@ -202,4 +223,5 @@ class TelegramControl:
                 "/매수중단 — 신규매수만 중단(청산은 계속)\n"
                 "/해제 — 매수중단 해제\n"
                 "/매도 ADA — 그 종목 즉시 시장가 청산(수동)\n"
+                "/거래 — 최근 체결 내역\n"
                 "엔진명: 코어 · 폭락 · 횡보")

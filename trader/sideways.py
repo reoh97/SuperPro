@@ -44,6 +44,7 @@ class SidewaysTrader:
         self.slope_max = float(sc.get("slope_max", 0.02)) # 평균선 기울기 한계(평탄)
         self.ma200_buf = float(sc.get("ma200_buf", 0.95)) # 종가 > MA200×이값 (하락장 차단)
         self.stop_pct = float(sc.get("stop_pct", 0.05))   # 진입가 -이값 깨지면 손절
+        self.vol_max = float(sc.get("vol_max", 1.2))      # 진입시 거래량 ≤ 평소×이값(시끄러운=박스깨짐 딥 차단)
         self.max_hold_bars = int(sc.get("max_hold_bars", 20))  # 최대 보유(15분봉 수)
         self.max_pos = int(sc.get("max_pos", 6))          # 동시보유(분산)
         self.interval_sec = float(sc.get("interval_sec", 300))
@@ -149,14 +150,17 @@ class SidewaysTrader:
         bbw_ma = bbw.rolling(100).mean()
         slope = sma.diff(self.bb_n) / sma
         ma200 = c.rolling(200).mean()
+        vol_ma = df["volume"].rolling(20).mean()
         i = -1
-        if pd.isna(bbw_ma.iloc[i]) or pd.isna(ma200.iloc[i]) or pd.isna(std.iloc[i]):
+        if pd.isna(bbw_ma.iloc[i]) or pd.isna(ma200.iloc[i]) or pd.isna(std.iloc[i]) or pd.isna(vol_ma.iloc[i]):
             return None
+        vol_ratio = float(df["volume"].iloc[i]) / float(vol_ma.iloc[i]) if float(vol_ma.iloc[i]) > 0 else 9.9
         lower = float(sma.iloc[i] - self.bb_k * std.iloc[i])
         upper = float(sma.iloc[i] + self.bb_k * std.iloc[i])
         in_range = (float(bbw.iloc[i]) < float(bbw_ma.iloc[i]) * self.bbw_q
                     and abs(float(slope.iloc[i])) < self.slope_max
-                    and float(c.iloc[i]) > float(ma200.iloc[i]) * self.ma200_buf)
+                    and float(c.iloc[i]) > float(ma200.iloc[i]) * self.ma200_buf
+                    and vol_ratio <= self.vol_max)          # 시끄러운 딥(박스깨짐) 차단
         return {"lower": lower, "upper": upper, "in_range": in_range,
                 "low": float(df["low"].iloc[i]), "high": float(df["high"].iloc[i]),
                 "close": float(c.iloc[i]), "bar": str(df.index[i])}
